@@ -57,14 +57,21 @@ def check_and_dismiss_popup(d: u2.Device) -> bool:
     return False
 
 def check_spins_status(d: u2.Device, profile: dict = None) -> str:
-    # Otimizado para ler contador primeiro
+    # 1. Tenta ler o contador numérico
     spin_count = read_spin_count_from_ui(d, profile=profile)
     if spin_count == 0: return "NO_SPINS"
     if spin_count > 0: return "HAS_SPINS"
     
-    # Se falhar a leitura do número, testa a existência do botão como salvaguarda
+    # 2. Se a leitura do número falhar (-1), verifique se o botão de anúncio está visível.
+    # No SpinCoin, se você tem spins, o botão de anúncio geralmente some ou muda.
+    # Mas o botão de SPIN pode estar lá mesmo com 0.
+    if d(textContains=config.AD_BUTTON_TEXT).exists(timeout=0.2):
+         return "NO_SPINS"
+         
+    # 3. Salvaguarda final: se o botão SPIN existe e NÃO há botão de anúncio, supomos que tem spins.
     if d(text=config.SPIN_BUTTON_TEXT).exists(timeout=0.2):
         return "HAS_SPINS"
+        
     return "UNKNOWN"
 
 def read_spin_count_from_ui(d: u2.Device, profile: dict = None) -> int:

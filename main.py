@@ -287,20 +287,40 @@ class SpinAutomator:
         Detecta se o dispositivo saiu do Spincoin para um app externo (Chrome, Play Store, etc)
         e força o retorno imediato.
         """
-        self.log(f"Redirecionamento externo detectado ({pkg_detected})! Retornando ao Spincoin...", "warning")
+        self.log(f"Redirecionamento externo detectado ({pkg_detected})! Analisando...", "warning")
         
+        # 1. Caso especial: Google Identity/Play Store Login
+        if pkg_detected in ["com.google.android.gms", "com.android.vending"]:
+             for text in config.PLAY_STORE_LOGIN_TEXTS:
+                  if self.device(textContains=text).exists(timeout=0.1):
+                       self.log(f"Popup de Identidade Google detectado! Tentando dispensar...", "action")
+                       self.device.press("back")
+                       self.wait(1.5)
+                       if self.device.app_current().get("package") == config.APP_PACKAGE:
+                            return True
+                       # Segunda tentativa
+                       self.device.press("back")
+                       self.wait(1.5)
+                       break
+
         try:
-            # 1. Volte para o aplicativo
+            # 2. Volte para o aplicativo
             self.device.app_start(config.APP_PACKAGE)
-            self.wait(1.5)
+            self.wait(2.0)
             
-            # 2. Force parada de apps indesejados se abertos
+            # 3. Force parada de apps indesejados se abertos (Chrome é o mais problemático)
             if pkg_detected == "com.android.chrome":
                  self.device.app_stop("com.android.chrome")
             elif pkg_detected == "com.android.vending":
                  self.device.app_stop("com.android.vending")
-                 
-            return True
+            
+            # 4. Verifica se voltou com sucesso
+            curr = self.device.app_current().get("package")
+            if curr == config.APP_PACKAGE:
+                 self.log(f"Retorno ao Spincoin bem-sucedido.", "success")
+                 return True
+            return False
+            
         except Exception as e:
             self.log(f"Erro ao tratar redirecionamento: {e}", "error")
             return False
@@ -434,18 +454,20 @@ class SpinAutomator:
             # 2. Voltou para tela principal? (Sucesso!)
             if is_main_screen(self.device):
                 check_and_dismiss_popup(self.device)
+                
+                # Verificação extra solicitada pelo usuário (Se spins for 0, não girar)
                 spins = self.get_spins_count(quick=True)
                 if spins > 0:
                     self._update_coins()
-                    self.log(f"Anúncio validado! Spins: {spins}", "success")
+                    self.log(f"Anúncio validado! Spins disponíveis: {spins}", "success")
                     return True
                 else:
-                    self.wait(3)
+                    self.wait(5) # Espera sincronização do app
                     if self.get_spins_count(quick=True) > 0:
                          self.log("Anúncio validado com sucesso!", "success")
                          return True
-                    self.log("Voltou para main sem recompensa extra detectada.", "warning")
-                    return True # Às vezes demora a atualizar, mas se voltou pra main tratamos como sucesso
+                    self.log("Voltou para main, mas contador de spins ainda é 0.", "warning")
+                    return True 
 
             # 3. Verificar timer (Pillar: 'espere acabar até os segundos sumirem')
             timer = get_ad_timer(self.device)
@@ -479,8 +501,13 @@ class SpinAutomator:
             # 5. Timer acabou ou não existe -> Procurar X, Continuar ou '>|'
             elapsed = time.time() - start
             
+            # O usuário solicitou aguardar e detectar o anúncio antes de interagir.
+            # PASSIVE_WAIT_MINIMO: 10 segundos ignorando botões X (exceto se for retorno pra main)
+            if elapsed < 10:
+                 self.wait(1)
+                 continue
+                 
             # Ajuste de paciência: Se nunca vimos um timer, esperamos pelo menos 15s 
-            # para evitar fechar ads que ainda não exportaram os botões de recompensa.
             min_wait_fallback = getattr(config, 'AD_MIN_WAIT_FALLBACK', 15)
             required_wait = 1 if timer_was_active else min_wait_fallback
             

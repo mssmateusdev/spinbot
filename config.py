@@ -14,7 +14,7 @@ CLOSE_AD_TEXTS = ["×", "X", "Close", "Fechar", "✕", "╳", "Skip Ad", "Recomp
 # --- Popup de aviso ---
 POPUP_WARNING_TEXT = "Use all your spins before watching"
 POPUP_CLOSE_TEXTS = ["Close", "close", "CLOSE", "OK", "Ok", "Fechar"]
-PLAY_STORE_LOGIN_TEXTS = ["Confirme a sua identidade", "Inicie sessão", "Verify your identity", "Sign in"]
+PLAY_STORE_LOGIN_TEXTS = ["Confirme a sua identidade", "Inicie sessão", "Verify your identity", "Sign in", "Confirm sua identidade", "Verifique sua identidade", "Google Identity", "Account recovery"]
 
 # --- Tempos de Operação (Reduzidos para Máxima Performance) ---
 SPIN_WAIT = 3.2          # Tempo de animação da roleta
@@ -45,7 +45,7 @@ DEBUG_FOLDER = "debug_screenshots"
 
 # --- Pacotes Seguros (Não fechar se app mudar para estes durante anúncio) ---
 SAFE_AD_PACKAGES = [
-    "com.google.android.gms",     # Google Play Services (Core)
+    # "com.google.android.gms",   # Google Play Services (REMOVIDO: Interrompe com login)
     "com.google.android.webview", # Android System WebView
     "com.android.systemui",       # System UI
 ]
