@@ -56,6 +56,96 @@ FONT_SUB  = ("Segoe UI", 12, "bold")
 FONT_MAIN = ("Segoe UI", 10)
 FONT_MONO = ("Consolas", 10)
 
+class AutomatorWindow(tk.Toplevel):
+    def __init__(self, parent, serial, model, email, stop_event):
+        super().__init__(parent)
+        self.serial = serial
+        self.model = model
+        self.email = email
+        self.stop_event = stop_event
+        self.is_active = True
+        
+        self.title(f"BOT: {model} ({serial})")
+        self.geometry("400x500")
+        self.configure(bg=C["bg"])
+        
+        # UI Elements (Stats)
+        self._build_ui()
+        
+    def _build_ui(self):
+        f = tk.Frame(self, bg=C["bg"], padx=15, pady=15)
+        f.pack(fill="both", expand=True)
+        
+        tk.Label(f, text=f"Conta: {self.email}", font=("Segoe UI", 10, "bold"), bg=C["bg"], fg=C["accent"]).pack(anchor="w")
+        tk.Label(f, text=f"Dispositivo: {self.model}", font=("Segoe UI", 9), bg=C["bg"], fg=C["text_h"]).pack(anchor="w", pady=(0,10))
+        
+        # Stats Grid
+        s_frame = tk.Frame(f, bg=C["card"], padx=10, pady=10)
+        s_frame.pack(fill="x")
+        s_frame.columnconfigure(0, weight=1)
+        s_frame.columnconfigure(1, weight=1)
+        
+        # Ciclos
+        fc = tk.Frame(s_frame, bg=C["card"])
+        fc.grid(row=0, column=0, sticky="nw")
+        tk.Label(fc, text="CICLOS", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        self.lbl_cycles = tk.Label(fc, text="0", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["success"])
+        self.lbl_cycles.pack(anchor="w")
+        
+        # Pontos
+        fp = tk.Frame(s_frame, bg=C["card"])
+        fp.grid(row=0, column=1, sticky="nw")
+        tk.Label(fp, text="PONTOS HOJE", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        self.lbl_profit = tk.Label(fp, text="+0", font=("Segoe UI", 14, "bold"), bg=C["card"], fg=C["success"])
+        self.lbl_profit.pack(anchor="w")
+        
+        # BRL
+        fb = tk.Frame(s_frame, bg=C["card"])
+        fb.grid(row=1, column=1, sticky="nw", pady=(10,0))
+        tk.Label(fb, text="LUCRO BRL", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        self.lbl_profit_brl = tk.Label(fb, text="R$ 0,00", font=("Segoe UI", 14, "bold"), bg=C["card"], fg=C["success"])
+        self.lbl_profit_brl.pack(anchor="w")
+        
+        # Tempo
+        ft = tk.Frame(s_frame, bg=C["card"])
+        ft.grid(row=1, column=0, sticky="nw", pady=(10,0))
+        tk.Label(ft, text="TEMPO", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        self.lbl_time = tk.Label(ft, text="00:00:00", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["accent"])
+        self.lbl_time.pack(anchor="w")
+        
+        # Status
+        self.status_lbl = tk.Label(f, text="Status: Iniciando...", font=("Segoe UI", 9), bg=C["bg"], fg=C["warning"])
+        self.status_lbl.pack(pady=10)
+        
+        # Mini Log
+        log_f = tk.LabelFrame(f, text="Logs Locais", bg=C["bg"], fg=C["text_h"], bd=0, font=("Segoe UI", 8))
+        log_f.pack(fill="both", expand=True)
+        self.console = tk.Text(log_f, height=8, state="disabled", bg=C["console"], fg=C["text_h"], font=("Consolas", 8), bd=0, padx=5, pady=5)
+        self.console.pack(fill="both", expand=True)
+
+    def log(self, msg, level="info"):
+        if not self.winfo_exists(): return
+        self.console.config(state="normal")
+        ts = datetime.now().strftime("[%H:%M] ")
+        self.console.insert("end", f"{ts}{msg}\n")
+        self.console.see("end")
+        self.console.config(state="disabled")
+        
+    def update_stats(self, stats):
+        if not self.winfo_exists(): return
+        self.lbl_cycles.config(text=str(stats.get("cycles", 0)))
+        p = stats.get('profit', 0)
+        self.lbl_profit.config(text=f"+{p:,}".replace(',', '.'))
+        brl = CryptoConverter.coins_to_brl(p)
+        self.lbl_profit_brl.config(text=f"R$ {brl:,.4f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+        self.lbl_time.config(text=stats.get('elapsed', "00:00:00"))
+        self.status_lbl.config(text="Status: Ativo", fg=C["success"])
+
+    def on_finish(self):
+        self.is_active = False
+        if self.winfo_exists():
+            self.status_lbl.config(text="Status: Finalizado", fg=C["danger"])
+
 class SpinGUI:
     def __init__(self, root):
         self.root = root
@@ -122,46 +212,25 @@ class SpinGUI:
         self._add_nav_btn("settings", "⚙️ Configurações", lambda: self._show_view("settings"))
         self._add_nav_btn("console", "🖥️ Console", lambda: self._show_view("console"))
 
-        # Email da Conta (Caixa estilizada com Placeholder)
-        tk.Label(self.sidebar, text="Email da Conta:", font=("Segoe UI", 9, "bold"), 
+        # Lista de Emails (Múltiplas Contas - 1 por linha)
+        tk.Label(self.sidebar, text="Lista de Emails (1 por linha):", font=("Segoe UI", 9, "bold"), 
                  bg=C["sidebar"], fg=C["text_h"]).pack(pady=(20, 2), padx=15, anchor="w")
         
-        # Container para a borda/caixa
         entry_container = tk.Frame(self.sidebar, bg=C["border"], padx=1, pady=1)
-        entry_container.pack(pady=(0, 10), padx=15, fill="x")
+        entry_container.pack(pady=(0, 10), padx=15, fill="both", expand=True)
         
-        self.entry_email = tk.Entry(entry_container, bg=C["card"], fg="white", 
-                                  insertbackground="white", bd=0, font=("Segoe UI", 10),
-                                  highlightthickness=0, relief="flat")
-        self.entry_email.pack(fill="x", ipady=4, padx=5)
+        self.txt_emails = scrolledtext.ScrolledText(entry_container, bg=C["card"], fg="white", 
+                                                  insertbackground="white", bd=0, font=("Segoe UI", 9),
+                                                  highlightthickness=0, relief="flat", height=8)
+        self.txt_emails.pack(fill="both", expand=True, padx=2, pady=2)
         
-        # Lógica de Placeholder
-        self.placeholder = "seuemail@exemplo.com"
-        
-        def _on_focus_in(e):
-            if self.entry_email.get() == self.placeholder:
-                self.entry_email.delete(0, tk.END)
-                self.entry_email.config(fg="white")
-        
-        def _on_focus_out(e):
-            if not self.entry_email.get():
-                self.entry_email.insert(0, self.placeholder)
-                self.entry_email.config(fg=C["text_h"])
-        
-        self.entry_email.bind("<FocusIn>", _on_focus_in)
-        self.entry_email.bind("<FocusOut>", _on_focus_out)
-
-        # Preencher com info anterior OU placeholder cinza
+        # Preencher com info anterior
         from stats_manager import manager
         last_emails = list(manager.get_all_stats().keys())
         if last_emails: 
-            self.entry_email.insert(0, last_emails[0])
-            self.entry_email.config(fg="white")
-        else:
-            self.entry_email.insert(0, self.placeholder)
-            self.entry_email.config(fg=C["text_h"])
+            self.txt_emails.insert("1.0", "\n".join(last_emails))
 
-        tk.Label(self.sidebar, text="v0.4.0", font=("Segoe UI", 8), 
+        tk.Label(self.sidebar, text="v0.4.0 (Multi-Instance)", font=("Segoe UI", 8), 
                  bg=C["sidebar"], fg=C["text_h"]).pack(side="bottom", pady=10)
 
     def _add_nav_btn(self, key, text, command):
@@ -475,66 +544,93 @@ class SpinGUI:
             self._stop()
 
     def _start(self):
-        dev = self.selected_device.get()
-        if not dev:
-            messagebox.showwarning("Erro", "Selecione um dispositivo!")
-            self._show_view("settings")
-            return
-        
+        # 1. Obter dispositivos conectados
         try:
-            if ". " in dev and " | " in dev:
-                serial = dev.split(". ")[1].split(" | ")[0]
-            else:
-                serial = dev.split(" | ")[0]
-        except:
-            serial = dev
+            devices = adbutils.adb.device_list()
+        except Exception as e:
+            messagebox.showerror("Erro ADB", f"Falha ao listar dispositivos: {e}")
+            return
 
-        email = self.entry_email.get().strip()
-        if not email or email == self.placeholder:
-            messagebox.showwarning("Erro", "Por favor, insira um e-mail para a conta Faucet.")
-            self.entry_email.focus_set()
+        if not devices:
+            messagebox.showwarning("Aviso", "Nenhum dispositivo Android detectado via ADB!")
+            return
+
+        # 2. Obter emails da lista
+        emails_raw = self.txt_emails.get("1.0", tk.END).strip()
+        emails = [e.strip() for e in emails_raw.split("\n") if e.strip()]
+
+        if not emails:
+            messagebox.showwarning("Aviso", "Insira pelo menos um email na lista!")
+            return
+
+        # 3. Validar contagem
+        if len(emails) != len(devices):
+            messagebox.showwarning("Divergência", 
+                f"Número de emails ({len(emails)}) não coincide com o número de dispositivos ({len(devices)})!\n\n"
+                "A cada linha de email será designado um dispositivo em ordem.")
             return
 
         self.is_running = True
-        self.session_start = datetime.now() # Inicia cronômetro na UI
-        
-        # Pega lucro já existente para exibir imediatamente antes de capturar novo
-        saved_profit = manager.get_profit(email)
-        self.lbl_profit.config(text=f"+{saved_profit:,}".replace(',', '.'))
-        self.last_profit = saved_profit
-        
+        self.session_start = datetime.now()
         self.stop_event.clear()
-        self.btn_main.configure(text="PARAR AUTOMAÇÃO", bg=C["danger"])
-        self.status_lbl.config(text="Status: Executando...", fg=C["success"])
-        self.log(f"Iniciando em {serial} para {email}...", "header")
-        threading.Thread(target=self._run_automator, args=(serial, email), daemon=True).start()
+        self.btn_main.configure(text="PARAR TUDO", bg=C["danger"])
+        self.status_lbl.config(text=f"Status: {len(devices)} Instâncias Ativas", fg=C["success"])
+        
+        self.instances = []
+        for i, dev in enumerate(devices):
+            email = emails[i]
+            serial = dev.serial
+            model = dev.prop.get('ro.product.model', 'Desconhecido')
+            
+            self.log(f"Iniciando Instância #{i+1}: {model} ({serial}) -> {email}", "header")
+            
+            # Criar Janela Individual
+            window = AutomatorWindow(self.root, serial, model, email, self.stop_event)
+            self.instances.append(window)
+            
+            # Iniciar Thread da Automação
+            threading.Thread(
+                target=self._run_instance, 
+                args=(serial, email, window), 
+                daemon=True
+            ).start()
 
     def _stop(self):
         if self.is_running:
-            self.log("Solicitando parada...", "warning")
+            self.log("Solicitando parada de todas as instâncias...", "warning")
             self.stop_event.set()
             self.status_lbl.config(text="Status: Parando...", fg=C["warning"])
 
-    def _run_automator(self, serial, email):
+    def _run_instance(self, serial, email, window):
+        def _multi_log(msg, level="info"):
+            window.log(msg, level)
+            self.log(f"[{serial}] {msg}", level)
+
         automator = SpinAutomator(
             serial=serial,
             account_email=email,
             stop_event=self.stop_event,
-            on_log=self.log,
-            on_stats_update=self._update_stats
+            on_log=_multi_log,
+            on_stats_update=window.update_stats
         )
         try:
             automator.run()
         except Exception as e:
-            self.log(f"Erro Crítico: {e}", "error")
+            window.log(f"Erro Crítico na Instância: {e}", "error")
         finally:
-            self.root.after(0, self._on_finish)
+            self.root.after(0, lambda: self._on_instance_finish(window))
 
-    def _on_finish(self):
+    def _on_instance_finish(self, window):
+        window.on_finish()
+        # Verificar se todas terminaram
+        if all(not w.is_active for w in self.instances):
+            self._on_all_finish()
+
+    def _on_all_finish(self):
         self.is_running = False
         self.btn_main.configure(text="INICIAR AUTOMAÇÃO", bg=C["accent"])
-        self.status_lbl.config(text="Status: Parado", fg=C["text_h"])
-        self.log("Processo finalizado.", "header")
+        self.status_lbl.config(text="Status: Processo Finalizado", fg=C["text_h"])
+        self.log("Todas as instâncias foram finalizadas.", "header")
 
     def _update_stats(self, stats):
         def _u():
