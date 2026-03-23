@@ -154,11 +154,14 @@ class SpinAutomator:
                     self.log("Dispositivo conectado com sucesso!", "success")
                     optimize_emulator_memory(self.device)
                 
-                # Garantir início limpo (primeira iteração)
-                if self.start_time is None:
+                # Garantir início limpo (primeira iteração ou reconexão crítica)
+                if self.start_time is None or getattr(self, '_first_run', True):
+                    self.log(f"Bot v0.4.0 Iniciado - Realizando limpeza inicial de dados...", "header")
+                    self.device.app_clear(config.APP_PACKAGE)
+                    self.wait(3)
                     self.start_time = datetime.now()
                     self.last_action_time = time.time()
-                    self.log(f"Bot v0.4.0 Iniciado", "header")
+                    self._first_run = False
                 
                 # Garantir app aberto e logado
                 current_pkg = self.device.app_current().get("package")
@@ -191,9 +194,9 @@ class SpinAutomator:
                     self.errors_consecutivos += 1
                     
                     if self.errors_consecutivos >= 3:
-                        # Se já falhou 3 ciclos seguidos, forçamos o restart
-                        self.log("Muitas falhas seguidas. Reiniciando app...", "error")
-                        force_restart_app(self.device)
+                        # Se já falhou 3 ciclos seguidos, forçamos o restart com limpeza
+                        self.log("Muitas falhas seguidas. Reiniciando app com limpeza de dados...", "error")
+                        force_restart_app(self.device, clear_cache=True)
                         self.app_restarts += 1
                         self.errors_consecutivos = 0
                         
@@ -383,8 +386,8 @@ class SpinAutomator:
                 
                 # CHECK IDLE TIMEOUT (60s na main sem rodar nada)
                 if (time.time() - self.last_action_time) > 60:
-                    self.log("Inatividade na tela principal (>60s). Reiniciando app...", "error")
-                    force_restart_app(self.device)
+                    self.log("Inatividade na tela principal (>60s). Reiniciando app com limpeza de dados...", "error")
+                    force_restart_app(self.device, clear_cache=True)
                     self.app_restarts += 1
                     self.last_action_time = time.time()
                     self.wait(5)
@@ -536,9 +539,9 @@ class SpinAutomator:
 
             self.wait(1)
             
-        # TIMEOUT: Forçar restart do app
-        self.log(f"Timeout total (120s). Reiniciando app...", "error")
-        force_restart_app(self.device)
+        # TIMEOUT: Forçar restart do app com limpeza
+        self.log(f"Timeout total (120s). Reiniciando app com limpeza de dados...", "error")
+        force_restart_app(self.device, clear_cache=True)
         self.app_restarts += 1
         return False
 
