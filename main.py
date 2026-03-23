@@ -53,6 +53,7 @@ class SpinAutomator:
         self.total_ads = 0
         self.total_cycles = 0
         self.app_restarts = 0
+        self.consecutive_ghost_spins = 0 # Contador de giros sem ganhos
         self.errors_consecutivos = 0
         self.last_stats_update = 0
         
@@ -363,26 +364,40 @@ class SpinAutomator:
                         self.total_spins += 1
                         self.last_action_time = time.time()
                         
-                        # Espera a animação
-                        self.wait(2.0) 
+                        # Espera a animação e atualização do saldo (Aumentado para 5s conforme solicitado)
+                        self.wait(5.0) 
                         
-                        # Tenta ler o prêmio
+                        # Tenta ler o prêmio e atualizar moedas
                         from screen_reader import get_spin_result
                         prize = get_spin_result(self.device)
                         self._update_coins()
                         
                         # Validação de sucesso do giro
                         if prize <= 0 and self.current_coins <= coins_before:
-                             # Se não ganhou moedas nem detectou prêmio, algo travou
-                             self.log("Giro de spin parece ter falhado (sem animação ou prêmio). Reiniciando com limpeza...", "error")
-                             force_restart_app(self.device, clear_cache=True)
-                             self.wait(5)
-                             return False
-                        
-                        self.log(f"Spin realizado! Ganhou: +{prize} moedas", "success")
+                             self.consecutive_ghost_spins += 1
+                             self.log(f"Giro sem detecção de prêmio ({self.consecutive_ghost_spins}/3).", "warning")
+                             
+                             if self.consecutive_ghost_spins >= 3:
+                                 # Se falhou 3 vezes, reinicia com limpeza profunda
+                                 self.log("3 giros falharam consecutivamente. Reiniciando com limpeza de cache...", "error")
+                                 self.consecutive_ghost_spins = 0
+                                 force_restart_app(self.device, clear_cache=True)
+                                 self.wait(5)
+                                 return False
+                             
+                             # Caso contrário, apenas continua tentando
+                             continue
+
+                        # Se chegou aqui, o giro funcionou!
+                        self.consecutive_ghost_spins = 0
+                        if prize > 0:
+                            self.log(f"Spin realizado! Ganhou: +{prize} moedas", "success")
+                        else:
+                            self.log("Spin realizado com sucesso!", "success")
+                            
                         self.stats_update()
                         
-                        if self.wait(config.SPIN_WAIT - 2.0): return True
+                        if self.wait(config.SPIN_WAIT - 5.0): return True
                     continue
                     
                 elif status == "NO_SPINS":
@@ -451,6 +466,15 @@ class SpinAutomator:
                  self.wait(2)
                  continue
 
+            # 1.5. Verificar Recompensa Concedida (REIR PRIORIDADE)
+            # Ao detectar recompensa, o bot deve reiniciar imediatamente para não travar na tela final
+            if self.device(textContains="Recompensa concedida").exists(timeout=0.2) or \
+               self.device(textContains="Recompensa concluida").exists(timeout=0.2):
+                self.log("Recompensa concedida detectada! Reiniciando app imediatamente...", "success")
+                force_restart_app(self.device, clear_cache=False)
+                self.wait(5)
+                return True
+
             # 2. Voltou para tela principal? (Sucesso!)
             if is_main_screen(self.device):
                 check_and_dismiss_popup(self.device)
@@ -489,19 +513,9 @@ class SpinAutomator:
                 self.wait(1)
                 continue
 
-            # 4.5 Verificar se já apareceu 'Recompensa concedida' -> Reiniciar App
-            # O usuário solicitou que ao detectar a recompensa, reinicie o app para evitar travas.
-            if self.device(textContains="Recompensa concedida").exists(timeout=0.1) or \
-               self.device(textContains="Recompensa concluida").exists(timeout=0.1):
-                self.log("Recompensa concedida detectada! Reiniciando app para agilizar...", "success")
-                force_restart_app(self.device, clear_cache=False)
-                self.wait(5)
-                return True
-            
             # 5. Timer acabou ou não existe -> Procurar X, Continuar ou '>|'
             elapsed = time.time() - start
             
-            # O usuário solicitou aguardar e detectar o anúncio antes de interagir.
             # PASSIVE_WAIT_MINIMO: 10 segundos ignorando botões X (exceto se for retorno pra main)
             if elapsed < 10:
                  self.wait(1)
