@@ -325,11 +325,19 @@ class SpinAutomator:
         while (time.time() - phase_start) < 60:
             if self.stop_event and self.stop_event.is_set(): return True
             
-            # 0. Verificação específica do Google Chrome (Solicitação do Usuário)
+            # 0. Verificação específica do Google Chrome ou Play Store (Solicitação do Usuário)
             current_app = self.device.app_current()
-            if current_app.get("package") == "com.android.chrome":
+            curr_pkg = current_app.get("package")
+            
+            if curr_pkg == "com.android.chrome":
                  self.handle_chrome_interruption()
                  return False # Forçar reinício do fluxo
+            
+            if curr_pkg in ["com.android.vending", "com.google.android.gms"]:
+                self.log(f"Interrupção do Google ({curr_pkg}) detectada. Retornando ao Spinbot...", "warning")
+                self.device.app_start(config.APP_PACKAGE)
+                self.wait(2)
+                return True # Continua o ciclo
             
             if is_main_screen(self.device):
                 if check_and_dismiss_popup(self.device):
@@ -435,16 +443,17 @@ class SpinAutomator:
                 self.wait(8)
                 return False
             
-            # 1.5. Bloqueio da Play Store / Google Play Services? (Identidade/Login)
+            # 1.5. Bloqueio da Play Store / Google Play Services? (Solicitação do Usuário)
             current_app = self.device.app_current()
             curr_pkg = current_app.get("package")
             if curr_pkg in ["com.android.vending", "com.google.android.gms"]:
-                 for text in config.PLAY_STORE_LOGIN_TEXTS:
-                     if self.device(textContains=text).exists(timeout=0.1):
-                         self.log(f"Identidade Google detectada ({curr_pkg}). Retornando ao Spincoin...", "warning")
-                         self.device.app_start(config.APP_PACKAGE) # Traz para frente sem matar
-                         self.wait(2)
-                         break
+                 # O usuário solicitou apenas voltar para o aplicativo sem limpar dados
+                 self.log(f"Interrupção detectada ({curr_pkg}). Voltando ao Spinbot para prosseguir...", "warning")
+                 self.device.app_start(config.APP_PACKAGE)
+                 self.wait(2)
+                 # Não retornamos nem reiniciamos, apenas deixamos o loop do watch_ad continuar
+                 # para tentar encontrar o botão X ou o fim do vídeo.
+                 continue 
 
             # 2. Voltou para tela principal? (Sucesso!)
             if is_main_screen(self.device):
