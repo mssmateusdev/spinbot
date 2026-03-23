@@ -1,148 +1,86 @@
-# 🎰 Automador de Spins + Anúncios via ADB
+# 🎰 SPINBOT OPTIMIZED v0.4.0 - MAX PERFORMANCE
 
-Automatiza o ciclo de spins e anúncios em um aplicativo Android usando ADB (Android Debug Bridge).
+O **Spinbot** é uma ferramenta de automação avançada para o aplicativo Spincoin (Android), focada em maximizar o lucro através da automatização inteligente de spins e visualização de anúncios (ads). Esta versão conta com uma interface gráfica (GUI) moderna e sistemas de auto-recuperação de erros.
 
-## 📋 Pré-requisitos
+---
 
-### 1. ADB (Android Debug Bridge)
+## ✨ Funcionalidades Principais
 
-- Baixe o [Platform Tools](https://developer.android.com/tools/releases/platform-tools) do Android
-- Extraia e adicione a pasta ao **PATH** do Windows
-- Verifique: `adb version`
+-   **Dashboard em Tempo Real**: Visualize ciclos, lucros acumulados (em moedas e BRL), tempo de sessão e status atual.
+-   **Projeções Inteligentes**: Calcule estimativas de lucro para 1 hora, 1 dia, 1 semana e até 1 mês com base no seu desempenho atual.
+-   **Limpeza Inteligente de Cache (Novo!)**:
+    -   Limpeza inicial de dados ao iniciar a automação para garantir eficiência máxima.
+    -   Reset automático do app (`pm clear`) em caso de timeout de 120s nos anúncios.
+    -   Reinício limpo se o bot detectar inatividade (>60s) na tela principal.
+-   **Auto-Recuperação**:
+    -   Tratamento de interrupções do Google Chrome e Play Store.
+    -   Reset automático do ID de publicidade se os anúncios esgotarem.
+    -   Otimização de memória RAM do emulador periódica.
+-   **Multi-Dispositivos**: Escolha facilmente entre vários dispositivos ADB conectados.
+-   **Relatórios Persistentes**: Registro diário de lucros salvos por e-mail da conta.
 
+---
 
-### 2. Depuração USB no celular
+## 🛠️ Pré-requisitos
 
-1. Vá em **Configurações** → **Sobre o telefone**
-2. Toque 7x em **Número da versão** (ativa opções de desenvolvedor)
-3. Vá em **Opções de desenvolvedor** → Ative **Depuração USB**
-4. Conecte o celular via cabo USB
-5. Aceite a autorização no celular
+1.  **Python 3.10+**: Certifique-se de ter o Python instalado e no PATH.
+2.  **ADB (Android Debug Bridge)**: Necessário para a comunicação com o dispositivo.
+    -   O projeto já inclui um binário `adb.exe`, mas recomenda-se ter o [Platform Tools](https://developer.android.com/tools/releases/platform-tools) instalado no Windows.
+3.  **Dispositivo Android/Emulador**:
+    -   **Depuração USB Ativada** (em Opções do Desenvolvedor).
+    -   Resolução recomendada: **1080x2400** (ou calibrada via `calibrar.py`).
 
-### 3. Python 3.10+
+---
 
+## 🚀 Como Iniciar
+
+### 1. Instalar Dependências
+Abra o terminal na pasta do projeto e execute:
 ```bash
-python --version
-```
-
-## 🚀 Instalação
-
-```bash
-# Instalar dependências
 pip install -r requirements.txt
 ```
 
-## 🔧 Calibração (IMPORTANTE - Faça isso primeiro!)
-
-As coordenadas dos botões dependem da resolução do seu celular. Você precisa calibrar antes de rodar.
-
-### Passo 1: Capturar screenshot
-
+### 2. Abrir a Interface Gráfica
 ```bash
-python calibrar.py
+python gui.py
 ```
 
-Isso vai mostrar a resolução do celular e salvar uma screenshot na pasta `calibracao/`.
+### 3. Configuração Rápida
+1.  Selecione seu dispositivo na aba **Configurações**.
+2.  Insira seu **E-mail da Conta** na barra lateral.
+3.  Clique no botão **INICIAR AUTOMAÇÃO** no Dashboard.
 
-### Passo 2: Encontrar coordenadas
+---
 
-Abra a screenshot salva em um editor de imagens (ex: Paint) e anote as coordenadas (x, y) de:
+## 🔧 Calibração (Se necessário)
 
-- **Centro do botão SPIN**
-- **Centro do botão "See an ad..."**
-- **Botão X de fechar anúncio**
-- **Região do contador de spins** (retângulo: x1, y1, x2, y2)
-- **Região do timer de anúncio** (retângulo: x1, y1, x2, y2)
+Se os botões não estiverem sendo clicados corretamente devido à resolução do seu celular:
+1.  Vá em **Configurações** na GUI e clique em **Recalibrar Tela**.
+2.  Siga as instruções para gerar as novas coordenadas e atualizar o `config.py`.
 
-### Passo 3: Atualizar config.py
+---
 
-Edite o `config.py` com as coordenadas encontradas.
+## 📂 Estrutura do Projeto
 
-### Passo 4: Verificar posições
+-   `gui.py`: Interface gráfica principal (Tkinter).
+-   `main.py`: Lógica central da automação e loops de controle.
+-   `adb_utils.py`: Funções de baixo nível para interação via ADB.
+-   `screen_reader.py`: Processamento de imagem e detecção de elementos (OCR/Templates).
+-   `config.py`: Parâmetros de tempo, pacotes e coordenadas.
+-   `stats_manager.py`: Persistência de estatísticas e lucros diários.
 
-```bash
-python calibrar.py --regioes
-```
+---
 
-Abra a imagem gerada e verifique se os marcadores estão nos lugares corretos.
+## ⚠️ Avisos e Recomendações
 
-### Passo 5: Testar OCR
+-   **Mantenha a Tela Ligada**: O dispositivo deve permanecer com a tela ativa para o processamento visual.
+-   **Otimização**: Se notar lentidão no emulador, o bot tentará limpar o cache automaticamente a cada 10 ciclos.
+-   **Segurança**: O bot trata janelas pop-up de "Identidade Google" e "Play Store" automaticamente para evitar interrupções.
 
-```bash
-python calibrar.py --testar-ocr
-```
+---
 
-Verifique se o contador de spins está sendo lido corretamente.
-
-## ▶️ Execução
-
-### Modo normal
-
-```bash
-python main.py
-```
-
-### Modo simulação (não toca na tela)
-
-```bash
-python main.py --dry-run
-```
-
-## ⚙️ Configuração
-
-Edite o arquivo `config.py` para ajustar:
-
-| Parâmetro           | Descrição                              |
-| ------------------- | -------------------------------------- |
-| `SPIN_BUTTON`       | Coordenadas (x, y) do botão SPIN       |
-| `AD_BUTTON`         | Coordenadas (x, y) do botão de anúncio |
-| `CLOSE_AD_BUTTON`   | Coordenadas (x, y) do botão X          |
-| `SPIN_COUNT_REGION` | Região do contador de spins            |
-| `AD_TIMER_REGION`   | Região do timer do anúncio             |
-| `SPIN_WAIT`         | Tempo de espera após cada spin         |
-| `AD_MAX_WAIT`       | Timeout máximo do anúncio              |
-| `MAX_CYCLES`        | Limite de ciclos (None = infinito)     |
-| `DEBUG_MODE`        | Salva screenshots de erro              |
-
-## 🔄 Fluxo de Funcionamento
-
-```
-┌─────────────────────────────┐
-│   Início                    │
-└─────────────┬───────────────┘
-              ▼
-┌─────────────────────────────┐
-│   Captura screenshot        │
-│   Lê contador de spins      │
-└─────────────┬───────────────┘
-              ▼
-         ┌────────┐
-         │Spins>0?│──── Sim ──→ Clica SPIN → Espera animação ─┐
-         └────────┘                                            │
-              │ Não                                            │
-              ▼                                                │
-┌─────────────────────────────┐                                │
-│   Clica "See an ad..."      │                     ◄──────────┘
-│   Espera anúncio carregar   │
-└─────────────┬───────────────┘
-              ▼
-┌─────────────────────────────┐
-│   Monitora timer do anúncio │
-│   Espera chegar a 0         │
-└─────────────┬───────────────┘
-              ▼
-┌─────────────────────────────┐
-│   Clica X (fechar anúncio)  │
-│   Volta à tela principal    │
-└─────────────┬───────────────┘
-              ▼
-         Repete ciclo
-```
-
-## ⚠️ Notas Importantes
-
-- **Mantenha a tela do celular ligada** durante a automação
-- O programa usa `Ctrl+C` para parar
-- Screenshots de debug são salvas em `debug_screenshots/`
-- Se o OCR não funcionar bem, ajuste as regiões de recorte em `config.py`
-
+## 📝 Changelog v0.4.0
+-   Adicionada limpeza de cache (`pm clear`) na inicialização e timeouts.
+-   Nova interface Zinc Palette (Dark Modern).
+-   Sistema de projeção de ganhos financeiros (BRL).
+-   Melhoria radical no reconhecimento de botões de fechar anúncios (X).
