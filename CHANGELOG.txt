@@ -1,0 +1,29 @@
+# CHANGELOG - SpinBot
+
+## [v0.2] - 2026-02-13
+### Adicionado
+- Ícone oficial na interface e no executável.
+- Contador de tempo de execução em tempo real na Dashboard.
+- Numeração automática de dispositivos na lista e no título da janela.
+- Mensagem de aviso Beta na parte inferior da Dashboard.
+- Log de "Spin realizado com sucesso!" para melhor feedback visual.
+- Detecção inteligente do banner "Recompensa concedida" para reinício imediato.
+
+### Alterado
+- Interface redesenhada para ser mais compacta e moderna (Dark Blue Theme).
+- Sistema de reinício otimizado: agora apenas fecha e abre o app, sem limpar o cache (muito mais rápido).
+- Removidos campos de "Moedas" e "Lucro" da Dashboard para simplificação e otimização.
+- Removidos logs repetitivos de "Aguardando animação...".
+
+### Otimização
+- Remoção de identificação de elementos por IA (Redução de 800MB para 60MB de RAM).
+- Removido janelas de CMD
+
+---
+
+## [v0.1] - 2026-02-12
+### Inicial
+- Lançamento inicial com suporte a múltiplos dispositivos ADB.
+- Sistema de fases: Spin -> Anúncio -> Recuperação.
+- Detecção de popups e overlays automáticos.
+- Sistema de perfis de dispositivo para calibração personalizada.
