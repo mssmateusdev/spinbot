@@ -17,8 +17,9 @@ POPUP_CLOSE_TEXTS = ["Close", "close", "CLOSE", "OK", "Ok", "Fechar"]
 PLAY_STORE_LOGIN_TEXTS = ["Confirme a sua identidade", "Inicie sessão", "Verify your identity", "Sign in", "Confirm sua identidade", "Verifique sua identidade", "Google Identity", "Account recovery"]
 
 # --- Tempos de Operação (Reduzidos para Máxima Performance) ---
-SPIN_WAIT = 3.2          # Tempo de animação da roleta
+SPIN_WAIT = 3.2          # Tempo de animação padrão
 SPIN_WAIT_TIME = 3.2
+TURBO_CLICK_INTERVAL = 0.5 # Intervalo entre cliques no modo turbo
 
 AD_MAX_WAIT = 45         # Tempo máximo esperando anúncio
 AD_CHECK_INTERVAL = 1.5   # Polling mais rápido

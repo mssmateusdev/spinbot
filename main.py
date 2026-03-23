@@ -355,49 +355,62 @@ class SpinAutomator:
                 status = check_spins_status(self.device, self.device_profile)
                 
                 if status == "HAS_SPINS":
+                    self.log("MODO TURBO: Iniciando giros rápidos...", "action")
                     spin_btn = find_spin_button(self.device)
-                    if spin_btn:
-                        # Moedas antes do spin
-                        coins_before = self.current_coins
+                    if not spin_btn:
+                         self.log("Botão SPIN não encontrado. Reiniciando...", "warning")
+                         force_restart_app(self.device)
+                         continue
+                         
+                    # Coordenadas fixas para cliques ultra-rápidos
+                    btn_bounds = spin_btn.info.get('bounds')
+                    target_x = (btn_bounds['left'] + btn_bounds['right']) // 2
+                    target_y = (btn_bounds['top'] + btn_bounds['bottom']) // 2
+                    
+                    last_profit_time = time.time()
+                    coins_at_turbo_start = self.current_coins
+                    turbo_clicks = 0
+                    
+                    # Loop de Alta Velocidade (Turbo)
+                    # Para se: acabarem os spins, o app travar (10s sem lucro) ou stop_event
+                    while (time.time() - last_profit_time) < 10:
+                        if self.stop_event and self.stop_event.is_set(): break
                         
-                        if not self.dry_run: spin_btn.click()
+                        # Clique rápido por coordenadas
+                        if not self.dry_run:
+                             self.device.click(target_x, target_y)
+                        
+                        turbo_clicks += 1
                         self.total_spins += 1
                         self.last_action_time = time.time()
                         
-                        # Espera a animação e atualização do saldo (Aumentado para 5s conforme solicitado)
-                        self.wait(5.0) 
+                        # Intervalo mínimo para o toque ser processado
+                        self.wait(config.TURBO_CLICK_INTERVAL)
                         
-                        # Tenta ler o prêmio e atualizar moedas
+                        # Verificação de lucro (a cada ciclo do turbo)
                         from screen_reader import get_spin_result
                         prize = get_spin_result(self.device)
                         self._update_coins()
                         
-                        # Validação de sucesso do giro
-                        if prize <= 0 and self.current_coins <= coins_before:
-                             self.consecutive_ghost_spins += 1
-                             self.log(f"Giro sem detecção de prêmio ({self.consecutive_ghost_spins}/3).", "warning")
+                        if prize > 0 or self.current_coins > coins_at_turbo_start:
+                             # Sucesso! Resetamos o cronômetro de 10s
+                             self.log(f"Turbo Spin: +{prize} moedas! (Total Cliques: {turbo_clicks})", "success")
+                             last_profit_time = time.time()
+                             coins_at_turbo_start = self.current_coins
+                             self.stats_update()
                              
-                             if self.consecutive_ghost_spins >= 3:
-                                 # Se falhou 3 vezes, reinicia com limpeza profunda
-                                 self.log("3 giros falharam consecutivamente. Reiniciando com limpeza de cache...", "error")
-                                 self.consecutive_ghost_spins = 0
-                                 force_restart_app(self.device, clear_cache=True)
-                                 self.wait(5)
-                                 return False
-                             
-                             # Caso contrário, apenas continua tentando
-                             continue
-
-                        # Se chegou aqui, o giro funcionou!
-                        self.consecutive_ghost_spins = 0
-                        if prize > 0:
-                            self.log(f"Spin realizado! Ganhou: +{prize} moedas", "success")
-                        else:
-                            self.log("Spin realizado com sucesso!", "success")
-                            
-                        self.stats_update()
+                        # Verificação de fim de spins (a cada 3 cliques para não pesar o ADB)
+                        if turbo_clicks % 3 == 0:
+                             if check_spins_status(self.device) == "NO_SPINS":
+                                  self.log(f"Modo Turbo finalizado após {turbo_clicks} giros.", "info")
+                                  break
+                    
+                    # Se saiu por inatividade (10s sem lucro)
+                    if (time.time() - last_profit_time) >= 10:
+                        self.log("Timeout de 10s sem lucro no Modo Turbo. Possível travamento.", "error")
+                        force_restart_app(self.device, clear_cache=True)
+                        return False
                         
-                        if self.wait(config.SPIN_WAIT - 5.0): return True
                     continue
                     
                 elif status == "NO_SPINS":
