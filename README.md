@@ -145,3 +145,4 @@ Edite o arquivo `config.py` para ajustar:
 - O programa usa `Ctrl+C` para parar
 - Screenshots de debug são salvas em `debug_screenshots/`
 - Se o OCR não funcionar bem, ajuste as regiões de recorte em `config.py`
+
