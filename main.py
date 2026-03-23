@@ -500,10 +500,26 @@ class SpinAutomator:
             
             # 5. Timer acabou ou não existe -> Procurar X, Continuar ou '>|'
             elapsed = time.time() - start
-            min_wait = 1 if timer_was_active else 3 # Reduzido de 5 para 3 para ser mais ágil
             
-            if elapsed > min_wait:
+            # Ajuste de paciência: Se nunca vimos um timer, esperamos pelo menos 15s 
+            # para evitar fechar ads que ainda não exportaram os botões de recompensa.
+            min_wait_fallback = getattr(config, 'AD_MIN_WAIT_FALLBACK', 15)
+            required_wait = 1 if timer_was_active else min_wait_fallback
+            
+            if elapsed > required_wait:
                 close_btn = find_close_button(self.device)
+                
+                # Proteção extra: Se achou um botão escrito "Skip" ou "Pular", 
+                # só clica se já passou pelo menos 25 segundos, pois costumam não dar prêmio antes.
+                if close_btn:
+                    try:
+                        btn_info = close_btn.info
+                        btn_text = str(btn_info.get('text', '') or btn_info.get('description', '')).lower()
+                        if ("skip" in btn_text or "pular" in btn_text) and elapsed < 25:
+                            self.log(f"Botão '{btn_text}' ignorado por ser muito cedo ({int(elapsed)}s).", "info")
+                            close_btn = None
+                    except: pass
+
                 if close_btn:
                     ad_parts_closed += 1
                     btn_text = close_btn.info.get('text', 'X') or close_btn.info.get('description', 'X-Icon')

@@ -24,6 +24,7 @@ AD_MAX_WAIT = 45         # Tempo máximo esperando anúncio
 AD_CHECK_INTERVAL = 1.5   # Polling mais rápido
 CLOSE_AD_WAIT = 1.5      # Espera após fechar
 AD_LOAD_WAIT = 3.5       # Espera o anúncio abrir
+AD_MIN_WAIT_FALLBACK = 15  # Tempo mínimo que esperamos antes de fechar ads sem timer
 
 # --- Aplicativo ---
 APP_PACKAGE = "com.spincoin.appmobile.top"
