@@ -66,8 +66,9 @@ class AutomatorWindow(tk.Toplevel):
         self.is_active = True
         
         self.title(f"BOT: {model} ({serial})")
-        self.geometry("400x500")
+        self.geometry("550x650")
         self.configure(bg=C["bg"])
+        self.minsize(500, 600)
         
         # UI Elements (Stats)
         self._build_ui()
@@ -149,10 +150,10 @@ class AutomatorWindow(tk.Toplevel):
 class SpinGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPINBOT - v0.4.0")
-        self.root.geometry("450x600")
+        self.root.title("SPINBOT - v0.4.0 (Multi-Instance)")
+        self.root.geometry("950x700")
         self.root.configure(bg=C["bg"])
-        self.root.minsize(400, 550)
+        self.root.minsize(850, 600)
 
         # Ícone
         try:
@@ -176,7 +177,8 @@ class SpinGUI:
         self.last_profit = 0
 
         # Configuração do Grid
-        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=0) # Barra lateral fixa
+        self.root.grid_columnconfigure(1, weight=1) # Conteúdo expande
         self.root.grid_rowconfigure(0, weight=1)
 
         # Sidebar
@@ -198,7 +200,7 @@ class SpinGUI:
         self._show_view("home")
 
     def _build_sidebar(self):
-        self.sidebar = tk.Frame(self.root, bg=C["sidebar"], width=160)
+        self.sidebar = tk.Frame(self.root, bg=C["sidebar"], width=200)
         self.sidebar.grid(row=0, column=0, sticky="ns")
         self.sidebar.grid_propagate(False)
 
@@ -221,7 +223,7 @@ class SpinGUI:
         
         self.txt_emails = scrolledtext.ScrolledText(entry_container, bg=C["card"], fg="white", 
                                                   insertbackground="white", bd=0, font=("Segoe UI", 9),
-                                                  highlightthickness=0, relief="flat", height=8)
+                                                  highlightthickness=0, relief="flat", height=5)
         self.txt_emails.pack(fill="both", expand=True, padx=2, pady=2)
         
         # Preencher com info anterior
@@ -237,8 +239,8 @@ class SpinGUI:
         btn = tk.Button(self.sidebar, text=text, command=command,
                         bg=C["sidebar"], fg=C["text_h"],
                         font=("Segoe UI", 10), bd=0, activebackground=C["active"],
-                        activeforeground="white", cursor="hand2", anchor="w", padx=15, pady=12)
-        btn.pack(fill="x", pady=2)
+                        activeforeground="white", cursor="hand2", anchor="w", padx=15, pady=8)
+        btn.pack(fill="x", pady=1)
         self.nav_btns[key] = btn
 
     def _init_views(self):

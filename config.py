@@ -45,8 +45,7 @@ DEBUG_FOLDER = "debug_screenshots"
 
 # --- Pacotes Seguros (Não fechar se app mudar para estes durante anúncio) ---
 SAFE_AD_PACKAGES = [
-    "com.android.vending",        # Google Play Store
-    "com.google.android.gms",     # Google Play Services (Ads)
+    "com.google.android.gms",     # Google Play Services (Core)
     "com.google.android.webview", # Android System WebView
-    "com.sec.android.app.sbrowser" # Samsung Internet
+    "com.android.systemui",       # System UI
 ]

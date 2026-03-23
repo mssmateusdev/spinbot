@@ -282,41 +282,32 @@ class SpinAutomator:
         return False
 
 
-    def handle_chrome_interruption(self):
+    def handle_external_redirection(self, pkg_detected="Desconhecido"):
         """
-        Implementa o procedimento solicitado caso o Chrome abra:
-        1. Volta para o aplicativo
-        2. Force parada do Chrome
-        3. Force parada do Spincoin
-        4. Volta para a tela inicial
+        Detecta se o dispositivo saiu do Spincoin para um app externo (Chrome, Play Store, etc)
+        e força o retorno imediato.
         """
-        self.log("Google Chrome abriu! Iniciando procedimento de parada forçada...", "warning")
+        self.log(f"Redirecionamento externo detectado ({pkg_detected})! Retornando ao Spincoin...", "warning")
         
         try:
             # 1. Volte para o aplicativo
-            self.log("Voltando para o aplicativo Spincoin...", "action")
-            launch_app(self.device)
-            self.wait(2)
+            self.device.app_start(config.APP_PACKAGE)
+            self.wait(1.5)
             
-            # 2. Force parada do chrome
-            self.log("Forçando parada do Google Chrome...", "action")
-            self.device.app_stop("com.android.chrome")
-            self.wait(1)
-            
-            # 3. Force parada do spincoin
-            self.log("Forçando parada do Spincoin (App)...", "action")
-            self.device.app_stop(config.APP_PACKAGE)
-            self.wait(1)
-            
-            # 4. Volte para a tela inicial
-            self.log("Voltando para a tela inicial do dispositivo...", "action")
-            self.device.press("home")
-            self.wait(2)
-            
+            # 2. Force parada de apps indesejados se abertos
+            if pkg_detected == "com.android.chrome":
+                 self.device.app_stop("com.android.chrome")
+            elif pkg_detected == "com.android.vending":
+                 self.device.app_stop("com.android.vending")
+                 
             return True
         except Exception as e:
-            self.log(f"Erro ao tratar interrupção do Chrome: {e}", "error")
+            self.log(f"Erro ao tratar redirecionamento: {e}", "error")
             return False
+
+    def handle_chrome_interruption(self):
+        # Mantido por compatibilidade, mapeando para a nova lógica generalista
+        return self.handle_external_redirection("com.android.chrome")
 
     def main_cycle(self) -> bool:
         """Um ciclo: SPINs -> AD -> Voltar."""
@@ -329,15 +320,9 @@ class SpinAutomator:
             current_app = self.device.app_current()
             curr_pkg = current_app.get("package")
             
-            if curr_pkg == "com.android.chrome":
-                 self.handle_chrome_interruption()
+            if curr_pkg != config.APP_PACKAGE and curr_pkg not in config.SAFE_AD_PACKAGES:
+                 self.handle_external_redirection(curr_pkg)
                  return False # Forçar reinício do fluxo
-            
-            if curr_pkg in ["com.android.vending", "com.google.android.gms"]:
-                self.log(f"Interrupção do Google ({curr_pkg}) detectada. Retornando ao Spinbot...", "warning")
-                self.device.app_start(config.APP_PACKAGE)
-                self.wait(2)
-                return True # Continua o ciclo
             
             if is_main_screen(self.device):
                 if check_and_dismiss_popup(self.device):
@@ -351,26 +336,33 @@ class SpinAutomator:
                 if status == "HAS_SPINS":
                     spin_btn = find_spin_button(self.device)
                     if spin_btn:
+                        # Moedas antes do spin
+                        coins_before = self.current_coins
+                        
                         if not self.dry_run: spin_btn.click()
                         self.total_spins += 1
-                        self.last_action_time = time.time() # Atividade detectada
+                        self.last_action_time = time.time()
                         
-                        # Espera um pouco para o resultado aparecer (animação)
-                        self.wait(1.5) 
+                        # Espera a animação
+                        self.wait(2.0) 
                         
                         # Tenta ler o prêmio
                         from screen_reader import get_spin_result
                         prize = get_spin_result(self.device)
-                        if prize > 0:
-                            self.log(f"Spin realizado! Ganhou: +{prize} moedas", "success")
-                        else:
-                            self.log("Spin realizado com sucesso!", "success")
-                            
                         self._update_coins()
+                        
+                        # Validação de sucesso do giro
+                        if prize <= 0 and self.current_coins <= coins_before:
+                             # Se não ganhou moedas nem detectou prêmio, algo travou
+                             self.log("Giro de spin parece ter falhado (sem animação ou prêmio). Reiniciando com limpeza...", "error")
+                             force_restart_app(self.device, clear_cache=True)
+                             self.wait(5)
+                             return False
+                        
+                        self.log(f"Spin realizado! Ganhou: +{prize} moedas", "success")
                         self.stats_update()
                         
-                        # Espera o restante do tempo da animação
-                        if self.wait(config.SPIN_WAIT - 1.5): return True
+                        if self.wait(config.SPIN_WAIT - 2.0): return True
                     continue
                     
                 elif status == "NO_SPINS":
@@ -429,31 +421,15 @@ class SpinAutomator:
         while (time.time() - start) < max_duration:
             if self.stop_event and self.stop_event.is_set(): return False
             
-            # 1. App fechou ou Chrome abriu?
+            # 1. App fechou ou Redirecionou? (Bloqueio Agressivo de Apps Externos)
             current_app = self.device.app_current()
             curr_pkg = current_app.get("package")
             
-            if curr_pkg == "com.android.chrome":
-                self.handle_chrome_interruption()
-                return False
-                
-            if not is_app_running(self.device, safe_packages=config.SAFE_AD_PACKAGES):
-                self.log("App fechou durante anúncio. Reiniciando...", "warning")
-                launch_app(self.device)
-                self.wait(8)
-                return False
-            
-            # 1.5. Bloqueio da Play Store / Google Play Services? (Solicitação do Usuário)
-            current_app = self.device.app_current()
-            curr_pkg = current_app.get("package")
-            if curr_pkg in ["com.android.vending", "com.google.android.gms"]:
-                 # O usuário solicitou apenas voltar para o aplicativo sem limpar dados
-                 self.log(f"Interrupção detectada ({curr_pkg}). Voltando ao Spinbot para prosseguir...", "warning")
-                 self.device.app_start(config.APP_PACKAGE)
+            if curr_pkg != config.APP_PACKAGE and curr_pkg not in config.SAFE_AD_PACKAGES:
+                 # Se o pacote mudou para algo não autorizado (Chrome, Play Store, Samsung Internet, etc)
+                 self.handle_external_redirection(curr_pkg)
                  self.wait(2)
-                 # Não retornamos nem reiniciamos, apenas deixamos o loop do watch_ad continuar
-                 # para tentar encontrar o botão X ou o fim do vídeo.
-                 continue 
+                 continue
 
             # 2. Voltou para tela principal? (Sucesso!)
             if is_main_screen(self.device):
@@ -491,12 +467,14 @@ class SpinAutomator:
                 self.wait(1)
                 continue
 
-            # 4.5 Verificar se já apareceu 'Recompensa concedida'
+            # 4.5 Verificar se já apareceu 'Recompensa concedida' -> Reiniciar App
+            # O usuário solicitou que ao detectar a recompensa, reinicie o app para evitar travas.
             if self.device(textContains="Recompensa concedida").exists(timeout=0.1) or \
                self.device(textContains="Recompensa concluida").exists(timeout=0.1):
-                if not reward_received:
-                    self.log("Recompensa concedida! Tentando fechar anúncio...", "success")
-                    reward_received = True
+                self.log("Recompensa concedida detectada! Reiniciando app para agilizar...", "success")
+                force_restart_app(self.device, clear_cache=False)
+                self.wait(5)
+                return True
             
             # 5. Timer acabou ou não existe -> Procurar X, Continuar ou '>|'
             elapsed = time.time() - start
