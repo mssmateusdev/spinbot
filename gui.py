@@ -65,24 +65,25 @@ class AutomatorWindow(tk.Toplevel):
         self.stop_event = stop_event
         self.is_active = True
         
-        self.title(f"BOT: {model} ({serial})")
-        self.geometry("550x650")
+        # Design Compacto (Solicitação do Usuário)
+        self.title(f"{model}")
+        self.geometry("340x460")
         self.configure(bg=C["bg"])
-        self.minsize(500, 600)
+        self.resizable(False, False)
         
         # UI Elements (Stats)
         self._build_ui()
         
     def _build_ui(self):
-        f = tk.Frame(self, bg=C["bg"], padx=15, pady=15)
+        f = tk.Frame(self, bg=C["bg"], padx=10, pady=10)
         f.pack(fill="both", expand=True)
         
-        tk.Label(f, text=f"Conta: {self.email}", font=("Segoe UI", 10, "bold"), bg=C["bg"], fg=C["accent"]).pack(anchor="w")
-        tk.Label(f, text=f"Dispositivo: {self.model}", font=("Segoe UI", 9), bg=C["bg"], fg=C["text_h"]).pack(anchor="w", pady=(0,10))
+        tk.Label(f, text=f"Conta: {self.email}", font=("Segoe UI", 8, "bold"), bg=C["bg"], fg=C["accent"]).pack(anchor="w")
+        tk.Label(f, text=f"ID: {self.serial}", font=("Segoe UI", 7), bg=C["bg"], fg=C["text_h"]).pack(anchor="w", pady=(0,8))
         
-        # Stats Grid
-        s_frame = tk.Frame(f, bg=C["card"], padx=10, pady=10)
-        s_frame.pack(fill="x")
+        # Stats Grid (Mais compacto)
+        s_frame = tk.Frame(f, bg=C["card"], padx=8, pady=8)
+        s_frame.pack(fill="x", pady=5)
         s_frame.columnconfigure(0, weight=1)
         s_frame.columnconfigure(1, weight=1)
         
@@ -90,38 +91,38 @@ class AutomatorWindow(tk.Toplevel):
         fc = tk.Frame(s_frame, bg=C["card"])
         fc.grid(row=0, column=0, sticky="nw")
         tk.Label(fc, text="CICLOS", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_cycles = tk.Label(fc, text="0", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["success"])
+        self.lbl_cycles = tk.Label(fc, text="0", font=("Segoe UI", 12, "bold"), bg=C["card"], fg=C["success"])
         self.lbl_cycles.pack(anchor="w")
         
         # Pontos
         fp = tk.Frame(s_frame, bg=C["card"])
         fp.grid(row=0, column=1, sticky="nw")
         tk.Label(fp, text="PONTOS HOJE", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_profit = tk.Label(fp, text="+0", font=("Segoe UI", 14, "bold"), bg=C["card"], fg=C["success"])
+        self.lbl_profit = tk.Label(fp, text="+0", font=("Segoe UI", 11, "bold"), bg=C["card"], fg=C["success"])
         self.lbl_profit.pack(anchor="w")
         
         # BRL
         fb = tk.Frame(s_frame, bg=C["card"])
-        fb.grid(row=1, column=1, sticky="nw", pady=(10,0))
+        fb.grid(row=1, column=1, sticky="nw", pady=(8,0))
         tk.Label(fb, text="LUCRO BRL", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_profit_brl = tk.Label(fb, text="R$ 0,00", font=("Segoe UI", 14, "bold"), bg=C["card"], fg=C["success"])
+        self.lbl_profit_brl = tk.Label(fb, text="R$ 0,00", font=("Segoe UI", 11, "bold"), bg=C["card"], fg=C["success"])
         self.lbl_profit_brl.pack(anchor="w")
         
         # Tempo
         ft = tk.Frame(s_frame, bg=C["card"])
-        ft.grid(row=1, column=0, sticky="nw", pady=(10,0))
+        ft.grid(row=1, column=0, sticky="nw", pady=(8,0))
         tk.Label(ft, text="TEMPO", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_time = tk.Label(ft, text="00:00:00", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["accent"])
+        self.lbl_time = tk.Label(ft, text="00:00:00", font=("Segoe UI", 12, "bold"), bg=C["card"], fg=C["accent"])
         self.lbl_time.pack(anchor="w")
         
         # Status
-        self.status_lbl = tk.Label(f, text="Status: Iniciando...", font=("Segoe UI", 9), bg=C["bg"], fg=C["warning"])
-        self.status_lbl.pack(pady=10)
+        self.status_lbl = tk.Label(f, text="Status: Iniciando...", font=("Segoe UI", 8), bg=C["bg"], fg=C["warning"])
+        self.status_lbl.pack(pady=5)
         
-        # Mini Log
+        # Mini Log (Menor altura para compacidade)
         log_f = tk.LabelFrame(f, text="Logs Locais", bg=C["bg"], fg=C["text_h"], bd=0, font=("Segoe UI", 8))
         log_f.pack(fill="both", expand=True)
-        self.console = tk.Text(log_f, height=8, state="disabled", bg=C["console"], fg=C["text_h"], font=("Consolas", 8), bd=0, padx=5, pady=5)
+        self.console = tk.Text(log_f, height=10, state="disabled", bg=C["console"], fg=C["text_h"], font=("Consolas", 7), bd=0, padx=5, pady=5)
         self.console.pack(fill="both", expand=True)
 
     def log(self, msg, level="info"):
@@ -171,6 +172,9 @@ class SpinGUI:
         self.selected_device = tk.StringVar()
         self.email_faucet = tk.StringVar(value="seuemail@exemplo.com")
         self.adb_ip = tk.StringVar(value="127.0.0.1:5555")
+        
+        self.device_vars = {} # Dicionário serial -> tk.BooleanVar
+        self.ultra_eco = tk.BooleanVar(value=False)
         
         # Timer e Estatísticas persistentes na UI
         self.session_start = None
@@ -278,42 +282,64 @@ class SpinGUI:
         f.grid(row=0, column=0, sticky="nsew")
         f.grid_columnconfigure(0, weight=1)
         
-        tk.Label(f, text="Dashboard", font=("Segoe UI", 14, "bold"), bg=C["bg"], fg=C["text"]).pack(anchor="w", pady=(0, 15))
+        header = tk.Frame(f, bg=C["bg"])
+        header.pack(fill="x", pady=(0, 10))
+        tk.Label(header, text="Dashboard", font=("Segoe UI", 14, "bold"), bg=C["bg"], fg=C["text"]).pack(side="left")
+        
+        tk.Button(header, text="↻ Atualizar Dispositivos", command=self._refresh_devs, 
+                  bg=C["sidebar"], fg=C["text_h"], font=("Segoe UI", 8), bd=0, padx=10, cursor="hand2").pack(side="right")
+
+        # Seleção de Instâncias (Solicitação do Usuário)
+        sel_container = tk.LabelFrame(f, text="SELECIONE AS INSTÂNCIAS PARA TRABALHAR", bg=C["bg"], fg=C["accent"], 
+                                    font=("Segoe UI", 8, "bold"), bd=0)
+        sel_container.pack(fill="x", pady=(0, 15))
+        
+        self.device_list_frame = tk.Frame(sel_container, bg=C["sidebar"], padx=10, pady=10)
+        self.device_list_frame.pack(fill="x")
+        
+        # Opções de Otimização
+        opt_frame = tk.Frame(f, bg=C["bg"])
+        opt_frame.pack(fill="x", pady=(0, 10))
+        
+        tk.Checkbutton(opt_frame, text="🍀 MODO ULTRA-ECO (Reduzir resolução/DPI p/ economizar CPU/GPU)", 
+                       variable=self.ultra_eco, bg=C["bg"], fg=C["success"], 
+                       selectcolor=C["bg"], activebackground=C["bg"],
+                       activeforeground=C["success"], font=("Segoe UI", 8, "bold"),
+                       bd=0, cursor="hand2").pack(side="left")
+        
+        # Botão Principal
+        self.btn_main = tk.Button(f, text="INICIAR AUTOMAÇÃO", command=self._toggle_run,
+                                  bg=C["accent"], fg="white", font=("Segoe UI", 12, "bold"),
+                                  bd=0, cursor="hand2", activebackground=C["accent_h"], pady=12)
+        self.btn_main.pack(fill="x", pady=5)
 
         # Stats Container (Grid)
         stats_frame = tk.Frame(f, bg=C["card"], padx=15, pady=15)
-        stats_frame.pack(fill="x", pady=(0, 20))
+        stats_frame.pack(fill="x", pady=10)
         stats_frame.columnconfigure(0, weight=1)
         stats_frame.columnconfigure(1, weight=1)
 
         # Ciclos
         f_cycles = tk.Frame(stats_frame, bg=C["card"])
         f_cycles.grid(row=0, column=0, sticky="nw")
-        tk.Label(f_cycles, text="CICLOS", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        tk.Label(f_cycles, text="CICLOS TOTAIS", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
         self.lbl_cycles = tk.Label(f_cycles, text="0", font=("Segoe UI", 24, "bold"), bg=C["card"], fg=C["success"])
         self.lbl_cycles.pack(anchor="w")
 
         # Ganho Session
         f_profit = tk.Frame(stats_frame, bg=C["card"])
         f_profit.grid(row=0, column=1, sticky="nw")
-        tk.Label(f_profit, text="PONTOS HOJE", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        tk.Label(f_profit, text="PONTOS TOTAIS HOJE", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
         self.lbl_profit = tk.Label(f_profit, text="+0", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["success"])
         self.lbl_profit.pack(anchor="w")
 
         # Ganho BRL
         f_brl = tk.Frame(stats_frame, bg=C["card"])
         f_brl.grid(row=1, column=1, sticky="nw", pady=(15, 0))
-        tk.Label(f_brl, text="LUCRO EM BRL (R$)", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
+        tk.Label(f_brl, text="LUCRO TOTAL BRL", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
         self.lbl_profit_brl = tk.Label(f_brl, text="R$ 0,00", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["success"])
         self.lbl_profit_brl.pack(anchor="w")
 
-        # Saldo Atual (Full width below)
-        f_balance = tk.Frame(stats_frame, bg=C["card"])
-        f_balance.grid(row=2, column=0, columnspan=2, sticky="nw", pady=(15, 0))
-        tk.Label(f_balance, text="SALDO TOTAL NO APP", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_balance = tk.Label(f_balance, text="0", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["text"])
-        self.lbl_balance.pack(anchor="w")
-        
         # Tempo de Execução
         f_time = tk.Frame(stats_frame, bg=C["card"])
         f_time.grid(row=1, column=0, sticky="nw", pady=(15, 0))
@@ -324,18 +350,12 @@ class SpinGUI:
         # Status
         self.status_lbl = tk.Label(stats_frame, text="Status: Aguardando...", font=("Segoe UI", 9), bg=C["card"], fg=C["text_h"])
         self.status_lbl.grid(row=2, column=0, columnspan=2, sticky="sw", pady=(20,0))
-
-        # Botão Principal
-        self.btn_main = tk.Button(f, text="INICIAR AUTOMAÇÃO", command=self._toggle_run,
-                                  bg=C["accent"], fg="white", font=("Segoe UI", 12, "bold"),
-                                  bd=0, cursor="hand2", activebackground=C["accent_h"], pady=12)
-        self.btn_main.pack(fill="x", pady=5)
         
         # Mini Console
         log_frame = tk.LabelFrame(f, text="Últimas Atividades", bg=C["bg"], fg=C["text_h"], bd=0, font=("Segoe UI", 9))
-        log_frame.pack(fill="both", expand=True, pady=15)
+        log_frame.pack(fill="both", expand=True, pady=10)
         
-        self.mini_log = tk.Text(log_frame, height=6, state="disabled", bg=C["console"], fg=C["text_h"],
+        self.mini_log = tk.Text(log_frame, height=5, state="disabled", bg=C["console"], fg=C["text_h"],
                                 font=("Consolas", 8), bd=0, padx=5, pady=5)
         self.mini_log.pack(fill="both", expand=True)
 
@@ -546,15 +566,22 @@ class SpinGUI:
             self._stop()
 
     def _start(self):
-        # 1. Obter dispositivos conectados
+        # 1. Obter dispositivos selecionados
+        selected_serials = [s for s, var in self.device_vars.items() if var.get()]
+        
+        if not selected_serials:
+            messagebox.showwarning("Aviso", "Selecione pelo menos uma instância na lista acima para iniciar!")
+            return
+
         try:
-            devices = adbutils.adb.device_list()
+            all_devices = adbutils.adb.device_list()
+            devices = [d for d in all_devices if d.serial in selected_serials]
         except Exception as e:
             messagebox.showerror("Erro ADB", f"Falha ao listar dispositivos: {e}")
             return
 
         if not devices:
-            messagebox.showwarning("Aviso", "Nenhum dispositivo Android detectado via ADB!")
+            messagebox.showwarning("Aviso", "Dispositivos selecionados não foram encontrados. Tente atualizar a lista.")
             return
 
         # 2. Obter emails da lista
@@ -562,20 +589,20 @@ class SpinGUI:
         emails = [e.strip() for e in emails_raw.split("\n") if e.strip()]
 
         if not emails:
-            messagebox.showwarning("Aviso", "Insira pelo menos um email na lista!")
+            messagebox.showwarning("Aviso", "Insira pelo menos um email na lista lateral!")
             return
 
         # 3. Validar contagem
-        if len(emails) != len(devices):
-            messagebox.showwarning("Divergência", 
-                f"Número de emails ({len(emails)}) não coincide com o número de dispositivos ({len(devices)})!\n\n"
-                "A cada linha de email será designado um dispositivo em ordem.")
+        if len(emails) < len(devices):
+            messagebox.showwarning("Faltam Emails", 
+                f"Você selecionou {len(devices)} dispositivos, mas inseriu apenas {len(emails)} emails.\n"
+                "Adicione mais emails na barra lateral.")
             return
 
         self.is_running = True
         self.session_start = datetime.now()
         self.stop_event.clear()
-        self.btn_main.configure(text="PARAR TUDO", bg=C["danger"])
+        self.btn_main.configure(text="PARAR TODAS AS INSTÂNCIAS", bg=C["danger"])
         self.status_lbl.config(text=f"Status: {len(devices)} Instâncias Ativas", fg=C["success"])
         
         self.instances = []
@@ -586,9 +613,13 @@ class SpinGUI:
             
             self.log(f"Iniciando Instância #{i+1}: {model} ({serial}) -> {email}", "header")
             
-            # Criar Janela Individual
+            # Criar Janela Individual (Design Compacto)
             window = AutomatorWindow(self.root, serial, model, email, self.stop_event)
             self.instances.append(window)
+            
+            # Posicionamento em cascata para não sobrepor tudo de uma vez
+            offset = i * 40
+            window.geometry(f"+{offset}+{offset}")
             
             # Iniciar Thread da Automação
             threading.Thread(
@@ -615,11 +646,30 @@ class SpinGUI:
             on_log=_multi_log,
             on_stats_update=window.update_stats
         )
+        
+        # Aplicar otimizações se selecionado
+        if self.ultra_eco.get():
+            from adb_utils import apply_headless_optimizations
+            import uiautomator2 as u2
+            try:
+                d = u2.connect(serial)
+                apply_headless_optimizations(d)
+            except: pass
+
         try:
             automator.run()
         except Exception as e:
             window.log(f"Erro Crítico na Instância: {e}", "error")
         finally:
+            # Restaurar padrões ao sair
+            if self.ultra_eco.get():
+                from adb_utils import restore_display_defaults
+                import uiautomator2 as u2
+                try:
+                    d = u2.connect(serial)
+                    restore_display_defaults(d)
+                except: pass
+            
             self.root.after(0, lambda: self._on_instance_finish(window))
 
     def _on_instance_finish(self, window):
@@ -661,14 +711,52 @@ class SpinGUI:
 
     def _refresh_devs(self):
         try:
+            # Limpar lista atual
+            if hasattr(self, 'device_list_frame'):
+                for widget in self.device_list_frame.winfo_children():
+                    widget.destroy()
+            
             devices = adbutils.adb.device_list()
             vals = []
+            
+            if not devices:
+                if hasattr(self, 'device_list_frame'):
+                    tk.Label(self.device_list_frame, text="Nenhum dispositivo detectado. Verifique o ADB.", 
+                             bg=C["sidebar"], fg=C["danger"], font=("Segoe UI", 9)).pack(pady=5)
+            
             for i, d in enumerate(devices, 1):
                 model = d.prop.get('ro.product.model', '?')
-                vals.append(f"{i}. {d.serial} | {model}")
-            self.combo_dev['values'] = vals
-            if vals: self.combo_dev.current(0)
-        except: pass
+                serial = d.serial
+                
+                # Criar variável se não existir
+                if serial not in self.device_vars:
+                    self.device_vars[serial] = tk.BooleanVar(value=True)
+                
+                # Checkbutton estilizado
+                if hasattr(self, 'device_list_frame'):
+                    f_item = tk.Frame(self.device_list_frame, bg=C["sidebar"])
+                    f_item.pack(fill="x", pady=2)
+                    
+                    cb = tk.Checkbutton(f_item, text=f"{i}. {model} ({serial})", 
+                                       variable=self.device_vars[serial],
+                                       bg=C["sidebar"], fg=C["text"], 
+                                       selectcolor=C["bg"], activebackground=C["sidebar"],
+                                       activeforeground=C["accent"], font=("Segoe UI", 9),
+                                       bd=0, cursor="hand2")
+                    cb.pack(side="left")
+                    
+                    label_status = tk.Label(f_item, text="• Online", bg=C["sidebar"], fg=C["success"], font=("Segoe UI", 8))
+                    label_status.pack(side="right", padx=10)
+
+                vals.append(f"{i}. {serial} | {model}")
+            
+            # Também atualiza o combo nas configurações por compatibilidade
+            if hasattr(self, 'combo_dev'):
+                self.combo_dev['values'] = vals
+                if vals: self.combo_dev.current(0)
+                
+        except Exception as e:
+            print(f"Erro ao atualizar dispositivos: {e}")
 
     def _connect_adb(self):
         addr = self.adb_ip.get()

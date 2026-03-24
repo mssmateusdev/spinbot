@@ -54,6 +54,7 @@ class SpinAutomator:
         self.total_cycles = 0
         self.app_restarts = 0
         self.consecutive_ghost_spins = 0 # Contador de giros sem ganhos
+        self.consecutive_no_spins_after_ad = 0 # NOVO: Controle de loop de Ad bugado
         self.errors_consecutivos = 0
         self.last_stats_update = 0
         
@@ -497,13 +498,25 @@ class SpinAutomator:
                 if spins > 0:
                     self._update_coins()
                     self.log(f"Anúncio validado! Spins disponíveis: {spins}", "success")
+                    self.consecutive_no_spins_after_ad = 0 # Reseta o contador de erro
                     return True
                 else:
                     self.wait(5) # Espera sincronização do app
-                    if self.get_spins_count(quick=True) > 0:
+                    spins_retry = self.get_spins_count(quick=True)
+                    if spins_retry > 0:
                          self.log("Anúncio validado com sucesso!", "success")
+                         self.consecutive_no_spins_after_ad = 0
                          return True
-                    self.log("Voltou para main, mas contador de spins ainda é 0.", "warning")
+                    
+                    self.consecutive_no_spins_after_ad += 1
+                    self.log(f"Voltou para main, mas contador de spins ainda é 0 (Tentativa {self.consecutive_no_spins_after_ad}/2).", "warning")
+                    
+                    if self.consecutive_no_spins_after_ad >= 2:
+                        self.log("DETECÇÃO DE LOOP: O app não creditou os spins. Reiniciando forçado...", "error")
+                        force_restart_app(self.device, clear_cache=True)
+                        self.wait(5)
+                        self.consecutive_no_spins_after_ad = 0 # Reseta após o restart
+                        
                     return True 
 
             # 3. Verificar timer (Pillar: 'espere acabar até os segundos sumirem')

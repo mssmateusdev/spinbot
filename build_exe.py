@@ -3,9 +3,9 @@ import os
 import shutil
 
 # Limpar dist anterior
-if os.path.exists('dist/SpinBot_v0.4.0'):
+if os.path.exists('dist/SpinBot_v0.4.1'):
     try:
-        shutil.rmtree('dist/SpinBot_v0.4.0')
+        shutil.rmtree('dist/SpinBot_v0.4.1')
     except:
         pass
 
@@ -13,7 +13,7 @@ print("--- Iniciando Build do SpinBot (No Console) ---")
 
 args = [
     'gui.py',                      # Script principal
-    '--name=SpinBot_v0.4.0',       # Nome do executável (v0.4.0)
+    '--name=SpinBot_v0.4.1',       # Nome do executável (v0.4.1)
     '--onedir',                    # Pasta única (mais rápido que onefile)
     '--noconfirm',                 # Substituir destino sem perguntar
     '--clean',                     # Limpar cache

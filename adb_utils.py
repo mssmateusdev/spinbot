@@ -336,3 +336,45 @@ def reset_advertising_id(d: u2.Device) -> bool:
         print(f"{Fore.RED}[ERRO] Falha ao resetar ID: {e}{Style.RESET_ALL}")
     
     return False
+
+def apply_headless_optimizations(d: u2.Device):
+    """
+    Modo Ultra-Eco (Headless Simulado):
+    Reduz resolução, densidade e desativa animações para economizar recursos.
+    """
+    print(f"{Fore.MAGENTA}[ADB] Aplicando Otimizações Ultra-Eco (Headless)...{Style.RESET_ALL}")
+    try:
+        # 1. Reduzir Resolução e Densidade (Mínimo funcional para o app)
+        d.shell("wm size 360x640")
+        d.shell("wm density 160")
+        
+        # 2. Desativar Animações (Economiza CPU/GPU de renderização)
+        d.shell("settings put global window_animation_scale 0.0")
+        d.shell("settings put global transition_animation_scale 0.0")
+        d.shell("settings put global animator_duration_scale 0.0")
+        
+        # 3. Brilho no Mínimo e desativar sons se possível
+        d.shell("settings put system screen_brightness 1")
+        
+        print(f"{Fore.GREEN}[OK] Emulador otimizado para baixo consumo.{Style.RESET_ALL}")
+        return True
+    except Exception as e:
+        print(f"{Fore.RED}[ERRO] Falha ao aplicar headless: {e}{Style.RESET_ALL}")
+        return False
+
+def restore_display_defaults(d: u2.Device):
+    """
+    Restaura resolução, densidade e animações padrão do Android.
+    """
+    print(f"{Fore.CYAN}[ADB] Restaurando configurações padrão de tela...{Style.RESET_ALL}")
+    try:
+        d.shell("wm size reset")
+        d.shell("wm density reset")
+        d.shell("settings put global window_animation_scale 1.0")
+        d.shell("settings put global transition_animation_scale 1.0")
+        d.shell("settings put global animator_duration_scale 1.0")
+        print(f"{Fore.GREEN}[OK] Configurações restauradas.{Style.RESET_ALL}")
+        return True
+    except Exception as e:
+        print(f"{Fore.RED}[ERRO] Falha ao restaurar: {e}{Style.RESET_ALL}")
+        return False
