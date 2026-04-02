@@ -1,12 +1,30 @@
 import os
-import queue
 import sys
 import threading
-import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, scrolledtext, ttk
 
 import adbutils
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 import config
 from crypto_utils import CryptoConverter
@@ -15,7 +33,7 @@ from main import SpinAutomator
 from stats_manager import manager
 
 
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.6.2"
 
 
 def resource_path(relative_path):
@@ -32,411 +50,700 @@ if os.path.exists(_adb_bin):
 
 
 C = {
-    "bg": "#0b1220",
-    "surface": "#142033",
-    "surface_alt": "#1a2940",
-    "surface_soft": "#20324d",
-    "panel": "#0f1a2b",
-    "console": "#08111d",
-    "text": "#eef4ff",
-    "muted": "#9cb0c9",
-    "accent": "#30c48d",
-    "accent_soft": "#1f8b65",
-    "accent_alt": "#53a7ff",
-    "danger": "#ff6b6b",
-    "warning": "#ffcc66",
-    "success": "#4ade80",
-    "border": "#29405f",
+    "bg": "#141922",
+    "bg_alt": "#1a202b",
+    "panel": "#10151d",
+    "surface": "#1c2330",
+    "surface_alt": "#242d3c",
+    "surface_soft": "#2f3b50",
+    "console": "#0f141c",
+    "text": "#eff4ff",
+    "muted": "#95a3bc",
+    "accent": "#5f8fff",
+    "accent_2": "#7d63ff",
+    "success": "#2fd18f",
+    "warning": "#ffcb66",
+    "danger": "#ff7a7a",
+    "border": "#313b4f",
 }
 
-FONT_HERO = ("Bahnschrift", 22, "bold")
-FONT_TITLE = ("Bahnschrift", 16, "bold")
-FONT_SUBTITLE = ("Segoe UI Semibold", 11)
-FONT_BODY = ("Segoe UI", 10)
-FONT_SMALL = ("Segoe UI", 9)
-FONT_TINY = ("Segoe UI", 8)
-FONT_MONO = ("Consolas", 9)
+LEVEL_COLORS = {
+    "info": C["muted"],
+    "success": C["success"],
+    "warning": C["warning"],
+    "error": C["danger"],
+    "action": C["accent"],
+    "header": C["text"],
+}
+
+NAV_ITEMS = [
+    ("welcome", "01", "Inicio"),
+    ("home", "02", "Dashboard"),
+    ("predictions", "03", "Projecoes"),
+    ("reports", "04", "Relatorios"),
+    ("settings", "05", "Configuracoes"),
+    ("console", "06", "Console"),
+]
 
 
-class AutomatorWindow(tk.Toplevel):
-    def __init__(self, parent, serial, model, email, stop_event):
-        super().__init__(parent)
+class UiBus(QObject):
+    global_log = Signal(str, str)
+    instance_log = Signal(str, str, str)
+    instance_stats = Signal(str, dict)
+    instance_finished = Signal(str)
+
+
+class StatCard(QFrame):
+    def __init__(self, title, value="0", color=C["accent"]):
+        super().__init__()
+        self.setObjectName("StatCard")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+        title_label = QLabel(title.upper())
+        title_label.setObjectName("CardCaption")
+        self.value_label = QLabel(value)
+        self.value_label.setObjectName("StatValue")
+        self.value_label.setStyleSheet(f"color: {color};")
+        layout.addWidget(title_label)
+        layout.addWidget(self.value_label)
+
+    def set_value(self, value):
+        self.value_label.setText(value)
+
+
+class NavButton(QPushButton):
+    def __init__(self, index_text, text):
+        super().__init__(f"{index_text}  {text}")
+        self.setCheckable(True)
+        self.setObjectName("NavButton")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(40)
+
+
+class DeviceCard(QFrame):
+    def __init__(self, serial, model, checked=True):
+        super().__init__()
+        self.checkbox = QCheckBox(model)
+        self.checkbox.setChecked(checked)
+        self.checkbox.setCursor(Qt.PointingHandCursor)
+        self.setObjectName("DeviceCard")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(self.checkbox)
+        top.addStretch()
+        online = QLabel("Online")
+        online.setObjectName("OnlineLabel")
+        top.addWidget(online)
+
+        serial_label = QLabel(serial)
+        serial_label.setObjectName("DimLabel")
+
+        layout.addLayout(top)
+        layout.addWidget(serial_label)
+
+    def is_checked(self):
+        return self.checkbox.isChecked()
+
+
+class InstanceWindow(QMainWindow):
+    def __init__(self, serial, model, email):
+        super().__init__()
         self.serial = serial
         self.model = model
         self.email = email
-        self.stop_event = stop_event
         self.is_active = True
 
-        self.title(model)
-        self.geometry("390x520")
-        self.configure(bg=C["bg"])
-        self.resizable(False, False)
-        self._build_ui()
+        self.setWindowTitle(model)
+        self.resize(400, 520)
 
-    def _metric_block(self, parent, title, value, color, row, column):
-        card = tk.Frame(parent, bg=C["surface_alt"], padx=12, pady=10, highlightthickness=1, highlightbackground=C["border"])
-        card.grid(row=row, column=column, sticky="nsew", padx=4, pady=4)
-        tk.Label(card, text=title.upper(), font=FONT_TINY, bg=C["surface_alt"], fg=C["muted"]).pack(anchor="w")
-        label = tk.Label(card, text=value, font=("Bahnschrift", 16, "bold"), bg=C["surface_alt"], fg=color)
-        label.pack(anchor="w", pady=(6, 0))
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        header = QFrame()
+        header.setObjectName("Card")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(14, 14, 14, 14)
+        header_layout.setSpacing(4)
+        header_layout.addWidget(self._label(model, "Title"))
+        header_layout.addWidget(self._label(email, "AccentLabel"))
+        header_layout.addWidget(self._label(serial, "DimLabel"))
+
+        stats_wrap = QWidget()
+        stats = QGridLayout(stats_wrap)
+        stats.setContentsMargins(0, 0, 0, 0)
+        stats.setHorizontalSpacing(8)
+        stats.setVerticalSpacing(8)
+        self.cycles_card = StatCard("Ciclos", "0", C["accent"])
+        self.profit_card = StatCard("Pontos Hoje", "+0", C["success"])
+        self.time_card = StatCard("Tempo", "00:00:00", C["warning"])
+        self.brl_card = StatCard("Lucro BRL", "R$ 0,00", C["accent_2"])
+        stats.addWidget(self.cycles_card, 0, 0)
+        stats.addWidget(self.profit_card, 0, 1)
+        stats.addWidget(self.time_card, 1, 0)
+        stats.addWidget(self.brl_card, 1, 1)
+
+        self.status_label = self._label("Status: iniciando...", "WarnLabel")
+        self.console = QTextEdit()
+        self.console.setReadOnly(True)
+        self.console.setObjectName("Console")
+
+        root.addWidget(header)
+        root.addWidget(stats_wrap)
+        root.addWidget(self.status_label)
+        root.addWidget(self.console, 1)
+
+    def _label(self, text, object_name):
+        label = QLabel(text)
+        label.setObjectName(object_name)
         return label
 
-    def _build_ui(self):
-        shell = tk.Frame(self, bg=C["bg"], padx=12, pady=12)
-        shell.pack(fill="both", expand=True)
-
-        top = tk.Frame(shell, bg=C["surface"], padx=14, pady=14, highlightthickness=1, highlightbackground=C["border"])
-        top.pack(fill="x")
-        tk.Label(top, text=self.model, font=FONT_TITLE, bg=C["surface"], fg=C["text"]).pack(anchor="w")
-        tk.Label(top, text=self.email, font=FONT_SMALL, bg=C["surface"], fg=C["accent"]).pack(anchor="w", pady=(2, 0))
-        tk.Label(top, text=self.serial, font=FONT_TINY, bg=C["surface"], fg=C["muted"]).pack(anchor="w", pady=(4, 0))
-
-        stats = tk.Frame(shell, bg=C["bg"])
-        stats.pack(fill="x", pady=10)
-        stats.grid_columnconfigure((0, 1), weight=1)
-        self.lbl_cycles = self._metric_block(stats, "Ciclos", "0", C["success"], 0, 0)
-        self.lbl_profit = self._metric_block(stats, "Pontos hoje", "+0", C["accent"], 0, 1)
-        self.lbl_time = self._metric_block(stats, "Tempo", "00:00:00", C["accent_alt"], 1, 0)
-        self.lbl_profit_brl = self._metric_block(stats, "Lucro BRL", "R$ 0,00", C["warning"], 1, 1)
-
-        self.status_lbl = tk.Label(shell, text="Status: iniciando...", font=FONT_SMALL, bg=C["bg"], fg=C["warning"], anchor="w")
-        self.status_lbl.pack(fill="x", pady=(0, 8))
-
-        log_wrap = tk.Frame(shell, bg=C["surface"], padx=1, pady=1, highlightthickness=1, highlightbackground=C["border"])
-        log_wrap.pack(fill="both", expand=True)
-        self.console = tk.Text(log_wrap, height=12, state="disabled", bg=C["console"], fg=C["muted"], font=("Consolas", 8), bd=0, padx=8, pady=8, insertbackground=C["text"])
-        self.console.pack(fill="both", expand=True)
-
     def log(self, msg, level="info"):
-        if not self.winfo_exists():
-            return
-        self.console.config(state="normal")
-        self.console.insert("end", f"[{datetime.now():%H:%M}] {msg}\n")
-        self.console.see("end")
-        self.console.config(state="disabled")
+        self.console.append(f"[{datetime.now():%H:%M}] {msg}")
+        self.console.moveCursor(QTextCursor.End)
 
     def update_stats(self, stats):
-        if not self.winfo_exists():
-            return
         profit = stats.get("profit", 0)
         brl = CryptoConverter.coins_to_brl(profit)
-        self.lbl_cycles.config(text=str(stats.get("cycles", 0)))
-        self.lbl_profit.config(text=f"+{profit:,}".replace(",", "."))
-        self.lbl_time.config(text=stats.get("elapsed", "00:00:00"))
-        self.lbl_profit_brl.config(text=f"R$ {brl:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        self.status_lbl.config(text="Status: ativo", fg=C["success"])
+        self.cycles_card.set_value(str(stats.get("cycles", 0)))
+        self.profit_card.set_value(f"+{profit:,}".replace(",", "."))
+        self.time_card.set_value(stats.get("elapsed", "00:00:00"))
+        self.brl_card.set_value(f"R$ {brl:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        self.status_label.setText("Status: ativo")
+        self.status_label.setStyleSheet(f"color: {C['success']}; font-weight: 700;")
 
     def on_finish(self):
         self.is_active = False
-        if self.winfo_exists():
-            self.status_lbl.config(text="Status: finalizado", fg=C["danger"])
+        self.status_label.setText("Status: finalizado")
+        self.status_label.setStyleSheet(f"color: {C['danger']}; font-weight: 700;")
 
 
-class SpinGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title(f"SpinBot v{APP_VERSION}")
-        self.root.geometry("1180x760")
-        self.root.minsize(1024, 680)
-        self.root.configure(bg=C["bg"])
-
-        self.log_queue = queue.Queue()
+class SpinGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.bus = UiBus()
         self.stop_event = threading.Event()
-
-        self.selected_device = tk.StringVar()
-        self.adb_ip = tk.StringVar(value="127.0.0.1:5555")
-        self.ultra_eco = tk.BooleanVar(value=False)
-
+        self.selected_device_value = ""
         self.is_running = False
         self.session_start = None
         self.last_profit = 0
-        self.instances = []
-        self.device_vars = {}
         self.instance_stats = {}
+        self.instance_windows = {}
+        self.device_cards = {}
         self.reports_dirty = True
 
-        self._setup_window_icon()
-        self._configure_styles()
-        self._build_layout()
-        self._init_views()
-
-        self.root.after(100, self._poll_logs)
-        self.root.after(1000, self._tick)
+        self._setup_window()
+        self._build_ui()
+        self._connect_signals()
         self._refresh_devs()
-        self._show_view("home")
 
-    def _setup_window_icon(self):
-        try:
-            icon_path = resource_path("icon.png")
-            if os.path.exists(icon_path):
-                icon = tk.PhotoImage(file=icon_path)
-                self.root.iconphoto(True, icon)
-                self._icon_ref = icon
-        except Exception:
-            self._icon_ref = None
+        self.tick_timer = QTimer(self)
+        self.tick_timer.timeout.connect(self._tick)
+        self.tick_timer.start(1000)
 
-    def _configure_styles(self):
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure(
-            "Spin.TCombobox",
-            fieldbackground=C["surface_alt"],
-            background=C["surface_alt"],
-            foreground=C["text"],
-            bordercolor=C["border"],
-            lightcolor=C["border"],
-            darkcolor=C["border"],
-            arrowcolor=C["text"],
-        )
+    def _setup_window(self):
+        self.setWindowTitle(f"SpinBot v{APP_VERSION}")
+        self.resize(1220, 760)
+        self.setMinimumSize(QSize(980, 640))
+        icon_path = resource_path("icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
-    def _build_layout(self):
-        self.root.grid_columnconfigure(1, weight=1)
-        self.root.grid_rowconfigure(0, weight=1)
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        self.sidebar = tk.Frame(self.root, bg=C["panel"], width=290)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_propagate(False)
+        self.sidebar = self._build_sidebar()
+        root.addWidget(self.sidebar)
 
-        self.content_frame = tk.Frame(self.root, bg=C["bg"])
-        self.content_frame.grid(row=0, column=1, sticky="nsew", padx=18, pady=18)
-        self.content_frame.grid_columnconfigure(0, weight=1)
-        self.content_frame.grid_rowconfigure(0, weight=1)
-        self._build_sidebar()
+        content_shell = QWidget()
+        content_layout = QVBoxLayout(content_shell)
+        content_layout.setContentsMargins(14, 14, 14, 14)
+        self.stack = QStackedWidget()
+        content_layout.addWidget(self.stack)
+        root.addWidget(content_shell, 1)
+
+        self.pages = {}
+        self._build_welcome_page()
+        self._build_home_page()
+        self._build_predictions_page()
+        self._build_reports_page()
+        self._build_settings_page()
+        self._build_console_page()
+        self._show_page("welcome")
+        self._apply_styles()
 
     def _build_sidebar(self):
-        brand = tk.Frame(self.sidebar, bg=C["surface"], padx=18, pady=18, highlightthickness=1, highlightbackground=C["border"])
-        brand.pack(fill="x", padx=16, pady=(16, 12))
-        tk.Label(brand, text="SpinBot", font=FONT_HERO, bg=C["surface"], fg=C["text"]).pack(anchor="w")
-        tk.Label(brand, text="Painel de controle para multiplas instancias e monitoramento em tempo real.", font=FONT_SMALL, bg=C["surface"], fg=C["muted"], justify="left", wraplength=230).pack(anchor="w", pady=(8, 0))
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(252)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
-        quick = tk.Frame(self.sidebar, bg=C["panel"])
-        quick.pack(fill="x", padx=16)
-        self.summary_cards = {
-            "devices": self._build_sidebar_stat(quick, "Dispositivos", "0"),
-            "emails": self._build_sidebar_stat(quick, "Emails", "0"),
-        }
+        brand = self._card("BrandCard")
+        brand_layout = QVBoxLayout(brand)
+        brand_layout.setContentsMargins(16, 16, 16, 16)
+        brand_layout.setSpacing(6)
+        brand_layout.addWidget(self._make_label("SpinBot", "HeroTitle"))
+        brand_layout.addWidget(self._make_label("Painel moderno, compacto e pronto para automacao em lote.", "DimLabel"))
+        layout.addWidget(brand)
 
-        self.nav_btns = {}
-        self._add_nav_btn("home", "Dashboard")
-        self._add_nav_btn("predictions", "Projecoes")
-        self._add_nav_btn("reports", "Relatorios")
-        self._add_nav_btn("settings", "Configuracoes")
-        self._add_nav_btn("console", "Console")
+        stats_row = QWidget()
+        stats = QGridLayout(stats_row)
+        stats.setContentsMargins(0, 0, 0, 0)
+        stats.setHorizontalSpacing(6)
+        self.devices_summary = StatCard("Dispositivos", "0", C["accent"])
+        self.emails_summary = StatCard("Emails", "0", C["accent_2"])
+        stats.addWidget(self.devices_summary, 0, 0)
+        stats.addWidget(self.emails_summary, 0, 1)
+        layout.addWidget(stats_row)
 
-        email_card = tk.Frame(self.sidebar, bg=C["surface"], padx=16, pady=16, highlightthickness=1, highlightbackground=C["border"])
-        email_card.pack(fill="both", expand=True, padx=16, pady=(8, 16))
-        tk.Label(email_card, text="Emails de trabalho", font=FONT_SUBTITLE, bg=C["surface"], fg=C["text"]).pack(anchor="w")
-        tk.Label(email_card, text="Use um email por linha. Os primeiros emails serao associados aos dispositivos selecionados.", font=FONT_TINY, bg=C["surface"], fg=C["muted"], justify="left", wraplength=230).pack(anchor="w", pady=(6, 10))
+        nav_card = self._card()
+        nav_layout = QVBoxLayout(nav_card)
+        nav_layout.setContentsMargins(8, 8, 8, 8)
+        nav_layout.setSpacing(4)
+        self.nav_buttons = {}
+        for key, index_text, text in NAV_ITEMS:
+            button = NavButton(index_text, text)
+            button.clicked.connect(lambda checked=False, item=key: self._show_page(item))
+            nav_layout.addWidget(button)
+            self.nav_buttons[key] = button
+        layout.addWidget(nav_card)
 
-        text_wrap = tk.Frame(email_card, bg=C["surface_soft"], padx=1, pady=1)
-        text_wrap.pack(fill="both", expand=True)
-        self.txt_emails = scrolledtext.ScrolledText(text_wrap, height=8, bg=C["surface_alt"], fg=C["text"], insertbackground=C["text"], bd=0, wrap="word", font=FONT_BODY, padx=10, pady=10, highlightthickness=0)
-        self.txt_emails.pack(fill="both", expand=True)
-
+        emails_card = self._card()
+        emails_layout = QVBoxLayout(emails_card)
+        emails_layout.setContentsMargins(12, 12, 12, 12)
+        emails_layout.setSpacing(8)
+        emails_layout.addWidget(self._make_label("Emails", "SectionTitle"))
+        emails_layout.addWidget(self._make_label("Um por linha para distribuir entre as instancias selecionadas.", "DimLabel"))
+        self.txt_emails = QPlainTextEdit()
+        self.txt_emails.setPlaceholderText("email1@dominio.com\nemail2@dominio.com")
+        self.txt_emails.setObjectName("InputArea")
         previous_emails = list(manager.get_all_stats().keys())
         if previous_emails:
-            self.txt_emails.insert("1.0", "\n".join(previous_emails))
+            self.txt_emails.setPlainText("\n".join(previous_emails))
+        self.txt_emails.textChanged.connect(self._update_email_counter)
+        emails_layout.addWidget(self.txt_emails, 1)
+        layout.addWidget(emails_card, 1)
 
-        tk.Label(self.sidebar, text=f"SpinBot v{APP_VERSION}", font=FONT_TINY, bg=C["panel"], fg=C["muted"]).pack(side="bottom", pady=(0, 14))
+        footer = self._make_label(f"SpinBot v{APP_VERSION}", "DimLabel")
+        footer.setAlignment(Qt.AlignCenter)
+        layout.addWidget(footer)
+        return sidebar
 
-    def _build_sidebar_stat(self, parent, title, value):
-        card = tk.Frame(parent, bg=C["surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=4)
-        tk.Label(card, text=title.upper(), font=FONT_TINY, bg=C["surface"], fg=C["muted"]).pack(anchor="w")
-        label = tk.Label(card, text=value, font=("Bahnschrift", 18, "bold"), bg=C["surface"], fg=C["accent_alt"])
-        label.pack(anchor="w", pady=(4, 0))
-        return label
+    def _build_welcome_page(self):
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(40, 40, 40, 40)
+        outer.addStretch()
 
-    def _add_nav_btn(self, key, text):
-        btn = tk.Button(self.sidebar, text=text, command=lambda item=key: self._show_view(item), bg=C["panel"], fg=C["muted"], activebackground=C["surface"], activeforeground=C["text"], relief="flat", bd=0, cursor="hand2", anchor="w", padx=18, pady=11, font=FONT_BODY)
-        btn.pack(fill="x", padx=16, pady=2)
-        self.nav_btns[key] = btn
+        card = self._card("WelcomeCard")
+        card.setMaximumWidth(560)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(34, 34, 34, 34)
+        card_layout.setSpacing(16)
+        title = self._make_label("SpinBot", "WelcomeTitle")
+        title.setAlignment(Qt.AlignCenter)
+        subtitle = self._make_label("Tela inicial de acesso ao painel. Clique no botao abaixo para abrir o programa.", "WelcomeSubtitle")
+        subtitle.setAlignment(Qt.AlignCenter)
+        open_button = self._button("Abrir Programa", primary=True)
+        open_button.setMinimumHeight(48)
+        open_button.clicked.connect(lambda: self._show_page("home"))
 
-    def _init_views(self):
-        self.views = {
-            "home": self._create_home_view(),
-            "predictions": self._create_predictions_view(),
-            "reports": self._create_reports_view(),
-            "settings": self._create_settings_view(),
-            "console": self._create_console_view(),
-        }
+        card_layout.addWidget(title)
+        card_layout.addWidget(subtitle)
+        card_layout.addSpacing(8)
+        card_layout.addWidget(open_button, 0, Qt.AlignCenter)
 
-    def _make_card(self, parent, title=None, subtitle=None, padding=16):
-        card = tk.Frame(parent, bg=C["surface"], padx=padding, pady=padding, highlightthickness=1, highlightbackground=C["border"])
-        if title:
-            tk.Label(card, text=title, font=FONT_TITLE, bg=C["surface"], fg=C["text"]).pack(anchor="w")
-        if subtitle:
-            tk.Label(card, text=subtitle, font=FONT_SMALL, bg=C["surface"], fg=C["muted"], wraplength=720, justify="left").pack(anchor="w", pady=(5, 0))
+        outer.addWidget(card, 0, Qt.AlignCenter)
+        outer.addStretch()
+        self.stack.addWidget(page)
+        self.pages["welcome"] = page
+
+    def _build_home_page(self):
+        page = QWidget()
+        grid = QGridLayout(page)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        grid.setColumnStretch(0, 3)
+        grid.setColumnStretch(1, 4)
+        grid.setRowStretch(2, 1)
+
+        hero = self._card()
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(14, 14, 14, 14)
+        hero_layout.setSpacing(10)
+        hero_layout.addWidget(self._make_label("Operacao Central", "SectionTitle"))
+        hero_layout.addWidget(self._make_label("Controle o lote atual, acompanhe o progresso e distribua a automacao entre varias instancias.", "DimLabel"))
+
+        actions = QHBoxLayout()
+        self.start_button = self._button("Iniciar", primary=True)
+        self.start_button.clicked.connect(self._toggle_run)
+        refresh_button = self._button("Atualizar")
+        refresh_button.clicked.connect(self._refresh_devs)
+        self.ultra_eco_checkbox = QCheckBox("Ultra-eco")
+        self.ultra_eco_checkbox.setCursor(Qt.PointingHandCursor)
+        actions.addWidget(self.start_button)
+        actions.addWidget(refresh_button)
+        actions.addStretch()
+        actions.addWidget(self.ultra_eco_checkbox)
+        hero_layout.addLayout(actions)
+
+        self.status_badge = QLabel("Aguardando inicio")
+        self.status_badge.setObjectName("StatusBadge")
+        hero_layout.addWidget(self.status_badge, 0, Qt.AlignLeft)
+        grid.addWidget(hero, 0, 0)
+
+        metrics_wrap = QWidget()
+        metrics = QGridLayout(metrics_wrap)
+        metrics.setContentsMargins(0, 0, 0, 0)
+        metrics.setHorizontalSpacing(8)
+        metrics.setVerticalSpacing(8)
+        self.total_cycles_card = StatCard("Ciclos", "0", C["accent"])
+        self.total_profit_card = StatCard("Pontos Hoje", "+0", C["success"])
+        self.total_time_card = StatCard("Tempo", "00:00:00", C["warning"])
+        self.total_brl_card = StatCard("Lucro BRL", "R$ 0,00", C["accent_2"])
+        metrics.addWidget(self.total_cycles_card, 0, 0)
+        metrics.addWidget(self.total_profit_card, 0, 1)
+        metrics.addWidget(self.total_time_card, 1, 0)
+        metrics.addWidget(self.total_brl_card, 1, 1)
+        grid.addWidget(metrics_wrap, 1, 0)
+
+        activity = self._card()
+        activity_layout = QVBoxLayout(activity)
+        activity_layout.setContentsMargins(14, 14, 14, 14)
+        activity_layout.addWidget(self._make_label("Atividades", "SectionTitle"))
+        self.mini_log = QTextEdit()
+        self.mini_log.setReadOnly(True)
+        self.mini_log.setObjectName("Console")
+        activity_layout.addWidget(self.mini_log, 1)
+        grid.addWidget(activity, 2, 0)
+
+        instances = self._card()
+        instances_layout = QVBoxLayout(instances)
+        instances_layout.setContentsMargins(14, 14, 14, 14)
+        instances_layout.addWidget(self._make_label("Instancias", "SectionTitle"))
+        instances_layout.addWidget(self._make_label("Lista compacta com rolagem para acomodar diferentes resolucoes.", "DimLabel"))
+        self.device_scroll = QScrollArea()
+        self.device_scroll.setWidgetResizable(True)
+        self.device_scroll.setObjectName("ScrollArea")
+        self.device_list_widget = QWidget()
+        self.device_list_layout = QVBoxLayout(self.device_list_widget)
+        self.device_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.device_list_layout.setSpacing(8)
+        self.device_list_layout.addStretch()
+        self.device_scroll.setWidget(self.device_list_widget)
+        instances_layout.addWidget(self.device_scroll, 1)
+        grid.addWidget(instances, 0, 1, 3, 1)
+
+        self.stack.addWidget(page)
+        self.pages["home"] = page
+
+    def _build_predictions_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        card = self._card()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.addWidget(self._make_label("Projecoes", "SectionTitle"))
+        card_layout.addWidget(self._make_label("Estimativas baseadas no ritmo atual da sessao.", "DimLabel"))
+        self.prediction_labels = {}
+        for label_text in ["1 Hora", "12 Horas", "1 Dia", "1 Semana", "1 Mes"]:
+            row = self._card("InnerCard")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.addWidget(self._make_label(label_text, "BodyLabel"))
+            row_layout.addStretch()
+            value = self._make_label("Calculando...", "AccentLabel")
+            self.prediction_labels[label_text] = value
+            row_layout.addWidget(value)
+            card_layout.addWidget(row)
+        layout.addWidget(card)
+        self.stack.addWidget(page)
+        self.pages["predictions"] = page
+
+    def _build_reports_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        card = self._card()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.addWidget(self._make_label("Relatorios Diarios", "SectionTitle"))
+        card_layout.addWidget(self._make_label("Resumo persistido por conta e total agregado do dia.", "DimLabel"))
+        self.reports_text = QPlainTextEdit()
+        self.reports_text.setReadOnly(True)
+        self.reports_text.setObjectName("Console")
+        refresh_button = self._button("Atualizar Relatorio")
+        refresh_button.clicked.connect(self._update_reports_text)
+        card_layout.addWidget(self.reports_text, 1)
+        card_layout.addWidget(refresh_button, 0, Qt.AlignLeft)
+        layout.addWidget(card)
+        self.stack.addWidget(page)
+        self.pages["reports"] = page
+
+    def _build_settings_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        connection = self._card()
+        connection_layout = QVBoxLayout(connection)
+        connection_layout.setContentsMargins(14, 14, 14, 14)
+        connection_layout.addWidget(self._make_label("Conexao e Dispositivo", "SectionTitle"))
+        connection_layout.addWidget(self._make_label("Atualize a lista local ou conecte um ADB remoto sem sair do painel.", "DimLabel"))
+        connection_layout.addWidget(self._make_label("Dispositivo padrao", "BodyLabel"))
+
+        combo_row = QHBoxLayout()
+        self.device_combo = QComboBox()
+        self.device_combo.currentTextChanged.connect(self._on_device_combo_changed)
+        combo_row.addWidget(self.device_combo, 1)
+        refresh_button = self._button("Atualizar")
+        refresh_button.clicked.connect(self._refresh_devs)
+        combo_row.addWidget(refresh_button)
+        connection_layout.addLayout(combo_row)
+
+        connection_layout.addWidget(self._make_label("ADB remoto (IP:porta)", "BodyLabel"))
+        adb_row = QHBoxLayout()
+        self.adb_input = QLineEdit("127.0.0.1:5555")
+        self.adb_input.setObjectName("LineInput")
+        adb_row.addWidget(self.adb_input, 1)
+        connect_button = self._button("Conectar", primary=True)
+        connect_button.clicked.connect(self._connect_adb)
+        adb_row.addWidget(connect_button)
+        connection_layout.addLayout(adb_row)
+
+        tools = self._card()
+        tools_layout = QVBoxLayout(tools)
+        tools_layout.setContentsMargins(14, 14, 14, 14)
+        tools_layout.addWidget(self._make_label("Ferramentas Avancadas", "SectionTitle"))
+        tools_layout.addWidget(self._make_label("Use a calibracao para ajustar leitura e clique em dispositivos com resolucoes diferentes.", "DimLabel"))
+        calibrate_button = self._button("Recalibrar Tela")
+        calibrate_button.clicked.connect(self._start_calib)
+        tools_layout.addWidget(calibrate_button, 0, Qt.AlignLeft)
+
+        layout.addWidget(connection)
+        layout.addWidget(tools)
+        layout.addStretch()
+        self.stack.addWidget(page)
+        self.pages["settings"] = page
+
+    def _build_console_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        card = self._card()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.addWidget(self._make_label("Console Consolidado", "SectionTitle"))
+        card_layout.addWidget(self._make_label("Logs completos das automacoes em execucao.", "DimLabel"))
+        self.txt_log = QTextEdit()
+        self.txt_log.setReadOnly(True)
+        self.txt_log.setObjectName("Console")
+        card_layout.addWidget(self.txt_log, 1)
+        layout.addWidget(card)
+        self.stack.addWidget(page)
+        self.pages["console"] = page
+
+    def _connect_signals(self):
+        self.bus.global_log.connect(self._append_global_log)
+        self.bus.instance_log.connect(self._append_instance_log)
+        self.bus.instance_stats.connect(self._store_instance_stats)
+        self.bus.instance_finished.connect(self._on_instance_finish)
+
+    def _apply_styles(self):
+        self.setStyleSheet(
+            f"""
+            QMainWindow {{
+                background: {C['bg']};
+            }}
+            QWidget {{
+                background: transparent;
+                color: {C['text']};
+                font-family: 'Segoe UI';
+                font-size: 12px;
+            }}
+            #Sidebar {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {C['panel']}, stop:1 {C['bg_alt']});
+                border-right: 1px solid {C['border']};
+            }}
+            #Card, #BrandCard, #StatCard, #DeviceCard, #InnerCard, #WelcomeCard {{
+                background: {C['surface']};
+                border: 1px solid {C['border']};
+                border-radius: 14px;
+            }}
+            #InnerCard {{
+                background: {C['surface_alt']};
+            }}
+            #WelcomeCard {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {C['surface']}, stop:1 {C['surface_alt']});
+            }}
+            QLabel, QCheckBox {{
+                background: transparent;
+                border: none;
+            }}
+            QStackedWidget, QScrollArea > QWidget > QWidget {{
+                background: transparent;
+            }}
+            #NavButton {{
+                text-align: left;
+                padding: 9px 12px;
+                border: 0;
+                border-radius: 10px;
+                background: {C['surface']};
+                color: {C['muted']};
+                font-weight: 700;
+            }}
+            #NavButton:checked {{
+                background: {C['surface_soft']};
+                color: {C['text']};
+            }}
+            QLabel#HeroTitle {{ font-size: 28px; font-weight: 800; color: {C['text']}; }}
+            QLabel#WelcomeTitle {{ font-size: 42px; font-weight: 800; color: {C['text']}; }}
+            QLabel#WelcomeSubtitle {{ font-size: 14px; color: {C['muted']}; }}
+            QLabel#SectionTitle {{ font-size: 20px; font-weight: 800; }}
+            QLabel#Title {{ font-size: 18px; font-weight: 800; }}
+            QLabel#StatValue {{ font-size: 28px; font-weight: 800; }}
+            QLabel#CardCaption, QLabel#DimLabel {{ color: {C['muted']}; }}
+            QLabel#BodyLabel {{ color: {C['text']}; font-weight: 700; }}
+            QLabel#AccentLabel {{ color: {C['accent']}; font-weight: 800; }}
+            QLabel#WarnLabel {{ color: {C['warning']}; font-weight: 800; }}
+            QLabel#OnlineLabel {{ color: {C['success']}; font-size: 11px; font-weight: 700; }}
+            QLabel#StatusBadge {{ background: {C['surface_soft']}; border-radius: 11px; padding: 7px 12px; }}
+            QPushButton {{ background: {C['surface_soft']}; color: {C['text']}; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 800; }}
+            QPushButton:hover {{ background: #3a4962; }}
+            QLineEdit#LineInput, QPlainTextEdit#InputArea, QPlainTextEdit#Console, QTextEdit#Console, QComboBox {{
+                background: {C['surface_alt']};
+                border: 1px solid {C['border']};
+                border-radius: 10px;
+                padding: 8px;
+                color: {C['text']};
+            }}
+            QComboBox {{
+                min-height: 18px;
+                padding-right: 30px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border: none;
+                background: {C['surface_soft']};
+                border-top-right-radius: 10px;
+                border-bottom-right-radius: 10px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                width: 0;
+                height: 0;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid {C['text']};
+                margin-right: 10px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {C['surface']};
+                color: {C['text']};
+                border: 1px solid {C['border']};
+                outline: 0;
+                selection-background-color: {C['surface_soft']};
+                selection-color: {C['text']};
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 28px;
+                padding: 6px 10px;
+                background: transparent;
+                color: {C['text']};
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background: {C['surface_soft']};
+                color: {C['text']};
+            }}
+            QTextEdit#Console, QPlainTextEdit#Console {{
+                background: {C['bg_alt']};
+            }}
+            QFrame {{
+                background: transparent;
+            }}
+            QScrollArea#ScrollArea {{ border: 0; background: transparent; }}
+            QScrollBar:vertical {{ background: {C['panel']}; width: 10px; border-radius: 5px; }}
+            QScrollBar::handle:vertical {{ background: {C['surface_soft']}; min-height: 24px; border-radius: 5px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QCheckBox {{ spacing: 8px; font-weight: 700; }}
+            """
+        )
+
+    def _card(self, object_name="Card"):
+        card = QFrame()
+        card.setObjectName(object_name)
         return card
 
-    def _create_home_view(self):
-        frame = tk.Frame(self.content_frame, bg=C["bg"])
-        frame.grid(row=0, column=0, sticky="nsew")
-        frame.grid_columnconfigure(0, weight=1)
-
-        hero = self._make_card(frame, "Operacao central", "Escolha as instancias, acompanhe os numeros do dia e inicie a automacao em lote.", padding=18)
-        hero.pack(fill="x", pady=(0, 14))
-
-        actions = tk.Frame(hero, bg=C["surface"])
-        actions.pack(fill="x", pady=(16, 0))
-        self.btn_main = tk.Button(actions, text="Iniciar automacao", command=self._toggle_run, bg=C["accent"], fg=C["bg"], activebackground=C["success"], activeforeground=C["bg"], relief="flat", bd=0, cursor="hand2", padx=18, pady=12, font=FONT_SUBTITLE)
-        self.btn_main.pack(side="left")
-        tk.Button(actions, text="Atualizar dispositivos", command=self._refresh_devs, bg=C["surface_soft"], fg=C["text"], activebackground=C["surface_alt"], activeforeground=C["text"], relief="flat", bd=0, cursor="hand2", padx=16, pady=12, font=FONT_BODY).pack(side="left", padx=10)
-        tk.Checkbutton(actions, text="Modo ultra-eco", variable=self.ultra_eco, bg=C["surface"], fg=C["success"], activebackground=C["surface"], activeforeground=C["success"], selectcolor=C["surface"], cursor="hand2", font=FONT_BODY, bd=0).pack(side="right")
-
-        devices_card = self._make_card(frame, "Instancias selecionadas", "Marque quais dispositivos entram na rodada atual.")
-        devices_card.pack(fill="x", pady=(0, 14))
-        self.device_list_frame = tk.Frame(devices_card, bg=C["surface"])
-        self.device_list_frame.pack(fill="x", pady=(12, 0))
-
-        metrics = tk.Frame(frame, bg=C["bg"])
-        metrics.pack(fill="x", pady=(0, 14))
-        metrics.grid_columnconfigure((0, 1), weight=1)
-        self.lbl_cycles = self._build_metric_card(metrics, "Ciclos totais", "0", C["accent_alt"], 0, 0)
-        self.lbl_profit = self._build_metric_card(metrics, "Pontos totais hoje", "+0", C["success"], 0, 1)
-        self.lbl_time = self._build_metric_card(metrics, "Tempo de sessao", "00:00:00", C["warning"], 1, 0)
-        self.lbl_profit_brl = self._build_metric_card(metrics, "Lucro em BRL", "R$ 0,00", C["accent"], 1, 1)
-
-        self.status_badge = tk.Label(frame, text="Aguardando inicio", bg=C["surface_soft"], fg=C["text"], padx=12, pady=8, font=FONT_BODY)
-        self.status_badge.pack(anchor="w", pady=(0, 14))
-
-        activity = self._make_card(frame, "Ultimas atividades", "Eventos recentes de todas as instancias em uma unica linha do tempo.")
-        activity.pack(fill="both", expand=True)
-        self.mini_log = tk.Text(activity, height=8, state="disabled", bg=C["console"], fg=C["muted"], font=FONT_MONO, bd=0, padx=10, pady=10, insertbackground=C["text"])
-        self.mini_log.pack(fill="both", expand=True, pady=(12, 0))
-        return frame
-
-    def _build_metric_card(self, parent, title, value, color, row, column):
-        card = tk.Frame(parent, bg=C["surface"], padx=16, pady=16, highlightthickness=1, highlightbackground=C["border"])
-        card.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
-        tk.Label(card, text=title.upper(), font=FONT_TINY, bg=C["surface"], fg=C["muted"]).pack(anchor="w")
-        label = tk.Label(card, text=value, font=("Bahnschrift", 24, "bold"), bg=C["surface"], fg=color)
-        label.pack(anchor="w", pady=(8, 0))
+    def _make_label(self, text, object_name):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setObjectName(object_name)
         return label
 
-    def _create_settings_view(self):
-        frame = tk.Frame(self.content_frame, bg=C["bg"])
-        frame.grid(row=0, column=0, sticky="nsew")
+    def _button(self, text, primary=False):
+        button = QPushButton(text)
+        if primary:
+            button.setStyleSheet(
+                f"QPushButton {{background: {C['accent']}; color: {C['text']}; border-radius: 10px; padding: 10px 14px; font-weight: 800;}}"
+                f"QPushButton:hover {{background: #7fa7ff;}}"
+            )
+        button.setCursor(Qt.PointingHandCursor)
+        return button
 
-        connection = self._make_card(frame, "Conexao e dispositivo", "Atualize a lista local ou conecte um ADB remoto sem sair do painel.")
-        connection.pack(fill="x", pady=(0, 14))
-        tk.Label(connection, text="Dispositivo padrao", font=FONT_BODY, bg=C["surface"], fg=C["muted"]).pack(anchor="w", pady=(12, 6))
-
-        combo_row = tk.Frame(connection, bg=C["surface"])
-        combo_row.pack(fill="x")
-        self.combo_dev = ttk.Combobox(combo_row, textvariable=self.selected_device, state="readonly", style="Spin.TCombobox")
-        self.combo_dev.pack(side="left", fill="x", expand=True, ipady=5)
-        tk.Button(combo_row, text="Atualizar", command=self._refresh_devs, bg=C["surface_soft"], fg=C["text"], relief="flat", bd=0, cursor="hand2", padx=12, pady=8, font=FONT_BODY).pack(side="left", padx=(8, 0))
-
-        tk.Label(connection, text="ADB remoto (IP:porta)", font=FONT_BODY, bg=C["surface"], fg=C["muted"]).pack(anchor="w", pady=(14, 6))
-        adb_row = tk.Frame(connection, bg=C["surface"])
-        adb_row.pack(fill="x")
-        tk.Entry(adb_row, textvariable=self.adb_ip, bg=C["surface_alt"], fg=C["text"], insertbackground=C["text"], relief="flat", bd=0, font=FONT_BODY).pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 8))
-        tk.Button(adb_row, text="Conectar", command=self._connect_adb, bg=C["accent_alt"], fg=C["bg"], relief="flat", bd=0, cursor="hand2", padx=16, pady=8, font=FONT_BODY).pack(side="left")
-
-        tools = self._make_card(frame, "Ferramentas avancadas", "Use a calibracao para ajustar leitura e clique em dispositivos com resolucoes diferentes.")
-        tools.pack(fill="x")
-        tk.Button(tools, text="Recalibrar tela", command=self._start_calib, bg=C["surface_soft"], fg=C["text"], relief="flat", bd=0, cursor="hand2", padx=16, pady=10, font=FONT_BODY).pack(anchor="w", pady=(12, 0))
-        return frame
-
-    def _create_console_view(self):
-        frame = tk.Frame(self.content_frame, bg=C["bg"])
-        frame.grid(row=0, column=0, sticky="nsew")
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
-
-        card = self._make_card(frame, "Console consolidado", "Logs completos das automacoes em execucao.")
-        card.grid(row=0, column=0, sticky="nsew")
-        self.txt_log = scrolledtext.ScrolledText(card, state="disabled", bg=C["console"], fg=C["muted"], font=FONT_MONO, bd=0, padx=12, pady=12, insertbackground=C["text"])
-        self.txt_log.pack(fill="both", expand=True, pady=(12, 0))
-
-        self.txt_log.tag_config("info", foreground=C["muted"])
-        self.txt_log.tag_config("header", foreground=C["text"], font=("Consolas", 10, "bold"))
-        self.txt_log.tag_config("success", foreground=C["success"])
-        self.txt_log.tag_config("warning", foreground=C["warning"])
-        self.txt_log.tag_config("error", foreground=C["danger"])
-        self.txt_log.tag_config("action", foreground=C["accent_alt"])
-        return frame
-
-    def _create_predictions_view(self):
-        frame = tk.Frame(self.content_frame, bg=C["bg"])
-        frame.grid(row=0, column=0, sticky="nsew")
-
-        card = self._make_card(frame, "Projecoes", "Estimativas dinamicas a partir do ritmo atual da sessao. Os valores estabilizam apos o primeiro minuto.")
-        card.pack(fill="x")
-
-        self.pred_labels = {}
-        for period in ["1 Hora", "12 Horas", "1 Dia", "1 Semana", "1 Mes"]:
-            row = tk.Frame(card, bg=C["surface_alt"], padx=14, pady=12, highlightthickness=1, highlightbackground=C["border"])
-            row.pack(fill="x", pady=5)
-            tk.Label(row, text=period, font=FONT_SUBTITLE, bg=C["surface_alt"], fg=C["text"]).pack(side="left")
-            label = tk.Label(row, text="Calculando...", font=("Bahnschrift", 16, "bold"), bg=C["surface_alt"], fg=C["success"])
-            label.pack(side="right")
-            self.pred_labels[period] = label
-        return frame
-
-    def _create_reports_view(self):
-        frame = tk.Frame(self.content_frame, bg=C["bg"])
-        frame.grid(row=0, column=0, sticky="nsew")
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
-
-        card = self._make_card(frame, "Relatorios diarios", "Resumo persistido por conta com total agregado do dia.")
-        card.grid(row=0, column=0, sticky="nsew")
-        self.reports_text = tk.Text(card, bg=C["console"], fg=C["muted"], font=("Consolas", 10), bd=0, padx=12, pady=12, insertbackground=C["text"])
-        self.reports_text.pack(fill="both", expand=True, pady=(12, 10))
-        tk.Button(card, text="Atualizar relatorio", command=self._update_reports_text, bg=C["accent"], fg=C["bg"], relief="flat", bd=0, cursor="hand2", padx=16, pady=10, font=FONT_BODY).pack(anchor="w")
-        return frame
-
-    def _show_view(self, view_name):
-        for key, btn in self.nav_btns.items():
-            if key == view_name:
-                btn.configure(bg=C["surface"], fg=C["text"])
-            else:
-                btn.configure(bg=C["panel"], fg=C["muted"])
-        self.views[view_name].tkraise()
-        if view_name == "reports" and self.reports_dirty:
+    def _show_page(self, key):
+        for nav_key, button in self.nav_buttons.items():
+            button.setChecked(nav_key == key)
+        self.stack.setCurrentWidget(self.pages[key])
+        if key == "reports" and self.reports_dirty:
             self._update_reports_text()
 
-    def log(self, msg, level="info"):
-        self.log_queue.put((msg, level))
+    def _update_email_counter(self):
+        self.emails_summary.set_value(str(len(self._get_emails())))
 
-    def _poll_logs(self):
-        while not self.log_queue.empty():
-            msg, level = self.log_queue.get()
+    def _get_emails(self):
+        return [line.strip() for line in self.txt_emails.toPlainText().splitlines() if line.strip()]
 
-            if hasattr(self, "txt_log"):
-                self.txt_log.config(state="normal")
-                max_lines = getattr(config, "MAX_LOG_LINES", 500)
-                num_lines = int(self.txt_log.index("end-1c").split(".")[0])
-                if num_lines > max_lines:
-                    self.txt_log.delete("1.0", f"{num_lines - max_lines + 1}.0")
-                self.txt_log.insert("end", f"[{datetime.now():%H:%M}] ", "info")
-                self.txt_log.insert("end", f"{msg}\n", level)
-                self.txt_log.see("end")
-                self.txt_log.config(state="disabled")
+    def _on_device_combo_changed(self, value):
+        self.selected_device_value = value
 
-            if hasattr(self, "mini_log"):
-                self.mini_log.config(state="normal")
-                num_lines = int(self.mini_log.index("end-1c").split(".")[0])
-                if num_lines > 20:
-                    self.mini_log.delete("1.0", "2.0")
-                self.mini_log.insert("end", f"[{datetime.now():%H:%M}] {msg}\n")
-                self.mini_log.see("end")
-                self.mini_log.config(state="disabled")
+    def _append_global_log(self, msg, level="info"):
+        timestamp = f"[{datetime.now():%H:%M}] "
+        self.txt_log.append(f"{timestamp}{msg}")
+        self.mini_log.append(f"{timestamp}{msg}")
+        self._trim_console(self.txt_log, getattr(config, "MAX_LOG_LINES", 500))
+        self._trim_console(self.mini_log, 20)
 
-        self.root.after(100, self._poll_logs)
+    def _append_instance_log(self, serial, msg, level="info"):
+        window = self.instance_windows.get(serial)
+        if window:
+            window.log(msg, level)
+        self.bus.global_log.emit(f"[{serial}] {msg}", level)
 
-    def _tick(self):
-        if self.is_running and self.session_start:
-            elapsed = str(datetime.now() - self.session_start).split(".")[0]
-            self.lbl_time.config(text=elapsed)
-            self._update_predictions(self.last_profit, elapsed)
-        self.summary_cards["emails"].config(text=str(len(self._get_emails())))
-        self.root.after(1000, self._tick)
+    def _trim_console(self, widget, max_lines):
+        lines = widget.toPlainText().splitlines()
+        if len(lines) > max_lines:
+            widget.setPlainText("\n".join(lines[-max_lines:]))
+            widget.moveCursor(QTextCursor.End)
 
     def _toggle_run(self):
         if self.is_running:
@@ -444,208 +751,202 @@ class SpinGUI:
         else:
             self._start()
 
-    def _get_emails(self):
-        raw = self.txt_emails.get("1.0", tk.END).strip()
-        return [email.strip() for email in raw.splitlines() if email.strip()]
-
     def _start(self):
-        selected_serials = [serial for serial, var in self.device_vars.items() if var.get()]
+        selected_serials = [serial for serial, card in self.device_cards.items() if card.is_checked()]
         if not selected_serials:
-            messagebox.showwarning("Aviso", "Selecione pelo menos uma instancia para iniciar.")
+            QMessageBox.warning(self, "Aviso", "Selecione pelo menos uma instancia para iniciar.")
             return
 
         emails = self._get_emails()
         if not emails:
-            messagebox.showwarning("Aviso", "Informe pelo menos um email na barra lateral.")
+            QMessageBox.warning(self, "Aviso", "Informe pelo menos um email na barra lateral.")
             return
 
         try:
             devices = [device for device in adbutils.adb.device_list() if device.serial in selected_serials]
         except Exception as exc:
-            messagebox.showerror("Erro ADB", f"Falha ao listar dispositivos: {exc}")
+            QMessageBox.critical(self, "Erro ADB", f"Falha ao listar dispositivos: {exc}")
             return
 
         if len(emails) < len(devices):
-            messagebox.showwarning("Faltam emails", f"Foram selecionados {len(devices)} dispositivos, mas existem apenas {len(emails)} emails preenchidos.")
+            QMessageBox.warning(self, "Faltam emails", f"Foram selecionados {len(devices)} dispositivos, mas existem apenas {len(emails)} emails preenchidos.")
             return
 
         self.is_running = True
         self.session_start = datetime.now()
         self.stop_event.clear()
         self.instance_stats = {}
-        self.instances = []
-
-        self.btn_main.configure(text="Parar automacao", bg=C["danger"], fg=C["text"], activebackground="#ff8585")
-        self.status_badge.config(text=f"{len(devices)} instancia(s) em execucao", bg=C["accent_soft"], fg=C["text"])
-        self.log(f"Iniciando lote com {len(devices)} dispositivo(s).", "header")
+        self.start_button.setText("Parar")
+        self.start_button.setStyleSheet(
+            f"QPushButton {{background: {C['danger']}; color: {C['text']}; border-radius: 10px; padding: 10px 14px; font-weight: 800;}}"
+            f"QPushButton:hover {{background: #ff8c8c;}}"
+        )
+        self.status_badge.setText(f"{len(devices)} instancia(s) em execucao")
+        self.bus.global_log.emit(f"Iniciando lote com {len(devices)} dispositivo(s).", "header")
 
         for index, device in enumerate(devices):
             serial = device.serial
             model = device.prop.get("ro.product.model", "Desconhecido")
             email = emails[index]
-
-            window = AutomatorWindow(self.root, serial, model, email, self.stop_event)
-            window.geometry(f"+{70 + (index * 34)}+{70 + (index * 34)}")
-            self.instances.append(window)
-
-            self.log(f"[{serial}] Instancia criada para {email}", "action")
-            threading.Thread(target=self._run_instance, args=(serial, email, window), daemon=True).start()
+            window = InstanceWindow(serial, model, email)
+            window.move(70 + (index * 28), 70 + (index * 28))
+            window.show()
+            self.instance_windows[serial] = window
+            threading.Thread(target=self._run_instance, args=(serial, email), daemon=True).start()
 
     def _stop(self):
         if not self.is_running:
             return
         self.stop_event.set()
-        self.status_badge.config(text="Encerrando instancias...", bg=C["warning"], fg=C["bg"])
-        self.log("Solicitando parada de todas as instancias...", "warning")
+        self.status_badge.setText("Encerrando instancias...")
+        self.bus.global_log.emit("Solicitando parada de todas as instancias...", "warning")
 
-    def _run_instance(self, serial, email, window):
-        def _multi_log(msg, level="info"):
-            window.log(msg, level)
-            self.log(f"[{serial}] {msg}", level)
+    def _run_instance(self, serial, email):
+        def _log(msg, level="info"):
+            self.bus.instance_log.emit(serial, msg, level)
 
-        def _on_stats(stats):
-            window.update_stats(stats)
-            self._store_instance_stats(serial, stats)
+        def _stats(stats):
+            self.bus.instance_stats.emit(serial, stats)
 
-        automator = SpinAutomator(serial=serial, account_email=email, stop_event=self.stop_event, on_log=_multi_log, on_stats_update=_on_stats)
+        automator = SpinAutomator(serial=serial, account_email=email, stop_event=self.stop_event, on_log=_log, on_stats_update=_stats)
 
-        if self.ultra_eco.get():
+        if self.ultra_eco_checkbox.isChecked():
             from adb_utils import apply_headless_optimizations
             import uiautomator2 as u2
 
             try:
                 apply_headless_optimizations(u2.connect(serial))
             except Exception as exc:
-                self.log(f"[{serial}] Falha ao aplicar ultra-eco: {exc}", "warning")
+                self.bus.instance_log.emit(serial, f"Falha ao aplicar ultra-eco: {exc}", "warning")
 
         try:
             automator.run()
         except Exception as exc:
-            window.log(f"Erro critico na instancia: {exc}", "error")
-            self.log(f"[{serial}] Erro critico na instancia: {exc}", "error")
+            self.bus.instance_log.emit(serial, f"Erro critico na instancia: {exc}", "error")
         finally:
-            if self.ultra_eco.get():
+            if self.ultra_eco_checkbox.isChecked():
                 from adb_utils import restore_display_defaults
                 import uiautomator2 as u2
 
                 try:
                     restore_display_defaults(u2.connect(serial))
                 except Exception as exc:
-                    self.log(f"[{serial}] Falha ao restaurar display: {exc}", "warning")
-
-            self.root.after(0, lambda: self._on_instance_finish(window, serial))
+                    self.bus.instance_log.emit(serial, f"Falha ao restaurar display: {exc}", "warning")
+            self.bus.instance_finished.emit(serial)
 
     def _store_instance_stats(self, serial, stats):
         self.instance_stats[serial] = stats
-        self.root.after(0, self._update_aggregate_stats)
+        window = self.instance_windows.get(serial)
+        if window:
+            window.update_stats(stats)
+        self._update_aggregate_stats()
 
     def _update_aggregate_stats(self):
         cycles = sum(item.get("cycles", 0) for item in self.instance_stats.values())
         profit = sum(item.get("profit", 0) for item in self.instance_stats.values())
-
         self.last_profit = profit
-        self.lbl_cycles.config(text=str(cycles))
-        self.lbl_profit.config(text=f"+{profit:,}".replace(",", "."))
-
-        brl_val = CryptoConverter.coins_to_brl(profit)
-        self.lbl_profit_brl.config(text=f"R$ {brl_val:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
-
+        self.total_cycles_card.set_value(str(cycles))
+        self.total_profit_card.set_value(f"+{profit:,}".replace(",", "."))
+        brl = CryptoConverter.coins_to_brl(profit)
+        self.total_brl_card.set_value(f"R$ {brl:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
         if self.is_running:
-            device_count = len([window for window in self.instances if window.is_active])
-            self.status_badge.config(text=f"{device_count} instancia(s) em execucao", bg=C["accent_soft"], fg=C["text"])
+            active_count = sum(1 for window in self.instance_windows.values() if window.is_active)
+            self.status_badge.setText(f"{active_count} instancia(s) em execucao")
+        self.setWindowTitle(f"SpinBot v{APP_VERSION} | {cycles} ciclos | +{profit:,}".replace(",", "."))
 
-        self.root.title(f"SpinBot v{APP_VERSION} | {cycles} ciclos | +{profit:,}".replace(",", "."))
-
-    def _on_instance_finish(self, window, serial):
-        window.on_finish()
-        self.instance_stats.pop(serial, None)
-        self._update_aggregate_stats()
-        if all(not item.is_active for item in self.instances):
+    def _on_instance_finish(self, serial):
+        window = self.instance_windows.get(serial)
+        if window:
+            window.on_finish()
+        if self.instance_windows and all(not item.is_active for item in self.instance_windows.values()):
             self._on_all_finish()
 
     def _on_all_finish(self):
         self.is_running = False
-        self.btn_main.configure(text="Iniciar automacao", bg=C["accent"], fg=C["bg"], activebackground=C["success"])
-        self.status_badge.config(text="Processo finalizado", bg=C["surface_soft"], fg=C["text"])
-        self.log("Todas as instancias foram finalizadas.", "header")
+        self.start_button.setText("Iniciar")
+        self.start_button.setStyleSheet(
+            f"QPushButton {{background: {C['accent']}; color: {C['text']}; border-radius: 10px; padding: 10px 14px; font-weight: 800;}}"
+            f"QPushButton:hover {{background: #7fa7ff;}}"
+        )
+        self.status_badge.setText("Processo finalizado")
         self.reports_dirty = True
+        self.bus.global_log.emit("Todas as instancias foram finalizadas.", "header")
 
     def _refresh_devs(self):
         try:
             devices = adbutils.adb.device_list()
         except Exception as exc:
-            self.log(f"Falha ao atualizar dispositivos: {exc}", "error")
+            self.bus.global_log.emit(f"Falha ao atualizar dispositivos: {exc}", "error")
             devices = []
 
-        if hasattr(self, "device_list_frame"):
-            for child in self.device_list_frame.winfo_children():
-                child.destroy()
+        self.devices_summary.set_value(str(len(devices)))
+
+        while self.device_list_layout.count() > 1:
+            item = self.device_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.device_cards = {}
+
+        if not devices:
+            empty = self._make_label("Nenhum dispositivo detectado. Verifique o ADB.", "WarnLabel")
+            self.device_list_layout.insertWidget(0, empty)
 
         combo_values = []
-        self.summary_cards["devices"].config(text=str(len(devices)))
-
-        if not devices and hasattr(self, "device_list_frame"):
-            tk.Label(self.device_list_frame, text="Nenhum dispositivo detectado. Verifique o ADB.", bg=C["surface"], fg=C["danger"], font=FONT_BODY).pack(anchor="w")
-
-        for index, device in enumerate(devices, start=1):
+        for device in devices:
             serial = device.serial
             model = device.prop.get("ro.product.model", "Desconhecido")
-            combo_values.append(f"{index}. {serial} | {model}")
+            combo_values.append(f"{serial} | {model}")
+            card = DeviceCard(serial, model, checked=True)
+            self.device_cards[serial] = card
+            self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, card)
 
-            if serial not in self.device_vars:
-                self.device_vars[serial] = tk.BooleanVar(value=True)
-
-            if hasattr(self, "device_list_frame"):
-                item = tk.Frame(self.device_list_frame, bg=C["surface_alt"], padx=12, pady=10, highlightthickness=1, highlightbackground=C["border"])
-                item.pack(fill="x", pady=4)
-                tk.Checkbutton(item, text=model, variable=self.device_vars[serial], bg=C["surface_alt"], fg=C["text"], activebackground=C["surface_alt"], activeforeground=C["text"], selectcolor=C["surface_alt"], cursor="hand2", bd=0, font=FONT_SUBTITLE).pack(anchor="w")
-                tk.Label(item, text=serial, font=FONT_TINY, bg=C["surface_alt"], fg=C["muted"]).pack(anchor="w", pady=(2, 0))
-                tk.Label(item, text="Online", font=FONT_TINY, bg=C["surface_alt"], fg=C["success"]).pack(anchor="e")
-
-        if hasattr(self, "combo_dev"):
-            self.combo_dev["values"] = combo_values
-            if combo_values:
-                self.combo_dev.current(0)
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self.device_combo.addItems(combo_values)
+        self.device_combo.blockSignals(False)
+        if combo_values:
+            self.selected_device_value = combo_values[0]
+            self.device_combo.setCurrentIndex(0)
 
     def _connect_adb(self):
-        address = self.adb_ip.get().strip()
+        address = self.adb_input.text().strip()
         if not address:
             return
         try:
-            self.log(f"Conectando a {address}...", "action")
+            self.bus.global_log.emit(f"Conectando a {address}...", "action")
             result = adbutils.adb.connect(address)
-            self.log(f"Resultado do ADB: {result}", "info")
+            self.bus.global_log.emit(f"Resultado do ADB: {result}", "info")
             self._refresh_devs()
         except Exception as exc:
-            self.log(str(exc), "error")
+            self.bus.global_log.emit(str(exc), "error")
 
     def _start_calib(self):
-        device_desc = self.selected_device.get().strip()
-        if not device_desc:
-            messagebox.showwarning("Erro", "Selecione um dispositivo nas configuracoes.")
+        if not self.selected_device_value:
+            QMessageBox.warning(self, "Erro", "Selecione um dispositivo nas configuracoes.")
             return
-
-        try:
-            if ". " in device_desc:
-                serial = device_desc.split(". ", 1)[1].split(" | ", 1)[0]
-            else:
-                serial = device_desc.split(" | ", 1)[0]
-        except Exception:
-            serial = device_desc
+        serial = self.selected_device_value.split(" | ", 1)[0]
 
         def _calibrate():
-            self.log(f"[{serial}] Iniciando calibracao...", "action")
+            self.bus.global_log.emit(f"[{serial}] Iniciando calibracao...", "action")
             try:
                 import uiautomator2 as u2
 
                 if calibrate_device(u2.connect(serial), serial):
-                    self.log(f"[{serial}] Calibracao concluida com sucesso.", "success")
+                    self.bus.global_log.emit(f"[{serial}] Calibracao concluida com sucesso.", "success")
                 else:
-                    self.log(f"[{serial}] Calibracao nao concluida.", "warning")
+                    self.bus.global_log.emit(f"[{serial}] Calibracao nao concluida.", "warning")
             except Exception as exc:
-                self.log(f"[{serial}] Erro na calibracao: {exc}", "error")
+                self.bus.global_log.emit(f"[{serial}] Erro na calibracao: {exc}", "error")
 
         threading.Thread(target=_calibrate, daemon=True).start()
+
+    def _tick(self):
+        if self.is_running and self.session_start:
+            elapsed = str(datetime.now() - self.session_start).split(".")[0]
+            self.total_time_card.set_value(elapsed)
+            self._update_predictions(self.last_profit, elapsed)
+        self._update_email_counter()
 
     def _update_predictions(self, profit, elapsed_str):
         try:
@@ -653,50 +954,33 @@ class SpinGUI:
             total_seconds = (hours * 3600) + (minutes * 60) + seconds
             if total_seconds < 60:
                 return
-
             rate = profit / total_seconds
-            periods = {
-                "1 Hora": 3600,
-                "12 Horas": 43200,
-                "1 Dia": 86400,
-                "1 Semana": 604800,
-                "1 Mes": 2592000,
-            }
+            periods = {"1 Hora": 3600, "12 Horas": 43200, "1 Dia": 86400, "1 Semana": 604800, "1 Mes": 2592000}
             for label, duration in periods.items():
-                projected = int(rate * duration)
-                self.pred_labels[label].config(text=f"+{projected:,}".replace(",", "."))
+                value = int(rate * duration)
+                self.prediction_labels[label].setText(f"+{value:,}".replace(",", "."))
         except Exception:
             return
 
     def _update_reports_text(self):
         stats = manager.get_all_stats()
         total = sum(stats.values())
-
-        self.reports_text.config(state="normal")
-        self.reports_text.delete("1.0", tk.END)
-        self.reports_text.insert("end", f"Relatorio do dia {manager.data['last_reset']}\n")
-        self.reports_text.insert("end", "=" * 42 + "\n\n")
+        lines = [f"Relatorio do dia {manager.data['last_reset']}", "=" * 42, ""]
         if not stats:
-            self.reports_text.insert("end", "Nenhum dado registrado hoje.\n")
+            lines.append("Nenhum dado registrado hoje.")
         else:
             for email, profit in stats.items():
-                self.reports_text.insert("end", f"Conta : {email}\n")
-                self.reports_text.insert("end", f"Pontos: +{profit:,}\n\n".replace(",", "."))
-
-        self.reports_text.insert("end", "-" * 42 + "\n")
-        self.reports_text.insert("end", f"TOTAL: +{total:,}\n".replace(",", "."))
-        self.reports_text.config(state="disabled")
+                lines.append(f"Conta : {email}")
+                lines.append(f"Pontos: +{profit:,}".replace(",", "."))
+                lines.append("")
+        lines.append("-" * 42)
+        lines.append(f"TOTAL: +{total:,}".replace(",", "."))
+        self.reports_text.setPlainText("\n".join(lines))
         self.reports_dirty = False
 
 
 if __name__ == "__main__":
-    try:
-        from ctypes import windll
-
-        windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-
-    root = tk.Tk()
-    app = SpinGUI(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = SpinGUI()
+    window.show()
+    sys.exit(app.exec())
