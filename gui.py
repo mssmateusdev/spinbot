@@ -1,60 +1,62 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, scrolledtext
-import threading
-import queue
 import os
+import queue
 import sys
+import threading
+import tkinter as tk
 from datetime import datetime
-from stats_manager import manager
-from crypto_utils import CryptoConverter
+from tkinter import messagebox, scrolledtext, ttk
+
+import adbutils
 
 import config
+from crypto_utils import CryptoConverter
+from device_profiles import calibrate_device
+from main import SpinAutomator
+from stats_manager import manager
 
-# ──────────────────────────────────────────────────────────
-# CONFIGURAÇÕES E UTILITÁRIOS
-# ──────────────────────────────────────────────────────────
+
+APP_VERSION = "0.6.1"
+
 
 def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-
     return os.path.join(base_path, relative_path)
 
-# Importar lógica do automador
-import adbutils
-from main import SpinAutomator
-from device_profiles import calibrate_device
 
-# Configurar caminho do ADB para o adbutils usar o interno se disponível
 _adb_bin = resource_path("adb.exe")
 if os.path.exists(_adb_bin):
     adbutils.adb_path = _adb_bin
 
-# CORES (GNI Palette - Dark Modern)
+
 C = {
-    "bg":       "#18181b",   # Zinc 900
-    "sidebar":  "#27272a",   # Zinc 800
-    "card":     "#27272a",   # Zinc 800 (Card BG)
-    "console":  "#09090b",   # Zinc 950
-    "text":     "#f4f4f5",   # Zinc 100
-    "text_h":   "#a1a1aa",   # Zinc 400
-    "accent":   "#6366f1",   # Indigo 500 (Primary Action)
-    "accent_h": "#818cf8",   # Indigo 400 (Hover)
-    "active":   "#4f46e5",   # Indigo 600 (Sidebar Active)
-    "danger":   "#ef4444",   # Red 500
-    "success":  "#22c55e",   # Green 500
-    "warning":  "#eab308",   # Yellow 500
-    "border":   "#3f3f46",   # Zinc 700
+    "bg": "#0b1220",
+    "surface": "#142033",
+    "surface_alt": "#1a2940",
+    "surface_soft": "#20324d",
+    "panel": "#0f1a2b",
+    "console": "#08111d",
+    "text": "#eef4ff",
+    "muted": "#9cb0c9",
+    "accent": "#30c48d",
+    "accent_soft": "#1f8b65",
+    "accent_alt": "#53a7ff",
+    "danger": "#ff6b6b",
+    "warning": "#ffcc66",
+    "success": "#4ade80",
+    "border": "#29405f",
 }
 
-FONT_HEAD = ("Segoe UI", 16, "bold")
-FONT_SUB  = ("Segoe UI", 12, "bold")
-FONT_MAIN = ("Segoe UI", 10)
-FONT_MONO = ("Consolas", 10)
+FONT_HERO = ("Bahnschrift", 22, "bold")
+FONT_TITLE = ("Bahnschrift", 16, "bold")
+FONT_SUBTITLE = ("Segoe UI Semibold", 11)
+FONT_BODY = ("Segoe UI", 10)
+FONT_SMALL = ("Segoe UI", 9)
+FONT_TINY = ("Segoe UI", 8)
+FONT_MONO = ("Consolas", 9)
+
 
 class AutomatorWindow(tk.Toplevel):
     def __init__(self, parent, serial, model, email, stop_event):
@@ -64,738 +66,637 @@ class AutomatorWindow(tk.Toplevel):
         self.email = email
         self.stop_event = stop_event
         self.is_active = True
-        
-        # Design Compacto (Solicitação do Usuário)
-        self.title(f"{model}")
-        self.geometry("340x460")
+
+        self.title(model)
+        self.geometry("390x520")
         self.configure(bg=C["bg"])
         self.resizable(False, False)
-        
-        # UI Elements (Stats)
         self._build_ui()
-        
+
+    def _metric_block(self, parent, title, value, color, row, column):
+        card = tk.Frame(parent, bg=C["surface_alt"], padx=12, pady=10, highlightthickness=1, highlightbackground=C["border"])
+        card.grid(row=row, column=column, sticky="nsew", padx=4, pady=4)
+        tk.Label(card, text=title.upper(), font=FONT_TINY, bg=C["surface_alt"], fg=C["muted"]).pack(anchor="w")
+        label = tk.Label(card, text=value, font=("Bahnschrift", 16, "bold"), bg=C["surface_alt"], fg=color)
+        label.pack(anchor="w", pady=(6, 0))
+        return label
+
     def _build_ui(self):
-        f = tk.Frame(self, bg=C["bg"], padx=10, pady=10)
-        f.pack(fill="both", expand=True)
-        
-        tk.Label(f, text=f"Conta: {self.email}", font=("Segoe UI", 8, "bold"), bg=C["bg"], fg=C["accent"]).pack(anchor="w")
-        tk.Label(f, text=f"ID: {self.serial}", font=("Segoe UI", 7), bg=C["bg"], fg=C["text_h"]).pack(anchor="w", pady=(0,8))
-        
-        # Stats Grid (Mais compacto)
-        s_frame = tk.Frame(f, bg=C["card"], padx=8, pady=8)
-        s_frame.pack(fill="x", pady=5)
-        s_frame.columnconfigure(0, weight=1)
-        s_frame.columnconfigure(1, weight=1)
-        
-        # Ciclos
-        fc = tk.Frame(s_frame, bg=C["card"])
-        fc.grid(row=0, column=0, sticky="nw")
-        tk.Label(fc, text="CICLOS", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_cycles = tk.Label(fc, text="0", font=("Segoe UI", 12, "bold"), bg=C["card"], fg=C["success"])
-        self.lbl_cycles.pack(anchor="w")
-        
-        # Pontos
-        fp = tk.Frame(s_frame, bg=C["card"])
-        fp.grid(row=0, column=1, sticky="nw")
-        tk.Label(fp, text="PONTOS HOJE", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_profit = tk.Label(fp, text="+0", font=("Segoe UI", 11, "bold"), bg=C["card"], fg=C["success"])
-        self.lbl_profit.pack(anchor="w")
-        
-        # BRL
-        fb = tk.Frame(s_frame, bg=C["card"])
-        fb.grid(row=1, column=1, sticky="nw", pady=(8,0))
-        tk.Label(fb, text="LUCRO BRL", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_profit_brl = tk.Label(fb, text="R$ 0,00", font=("Segoe UI", 11, "bold"), bg=C["card"], fg=C["success"])
-        self.lbl_profit_brl.pack(anchor="w")
-        
-        # Tempo
-        ft = tk.Frame(s_frame, bg=C["card"])
-        ft.grid(row=1, column=0, sticky="nw", pady=(8,0))
-        tk.Label(ft, text="TEMPO", font=("Segoe UI", 7, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_time = tk.Label(ft, text="00:00:00", font=("Segoe UI", 12, "bold"), bg=C["card"], fg=C["accent"])
-        self.lbl_time.pack(anchor="w")
-        
-        # Status
-        self.status_lbl = tk.Label(f, text="Status: Iniciando...", font=("Segoe UI", 8), bg=C["bg"], fg=C["warning"])
-        self.status_lbl.pack(pady=5)
-        
-        # Mini Log (Menor altura para compacidade)
-        log_f = tk.LabelFrame(f, text="Logs Locais", bg=C["bg"], fg=C["text_h"], bd=0, font=("Segoe UI", 8))
-        log_f.pack(fill="both", expand=True)
-        self.console = tk.Text(log_f, height=10, state="disabled", bg=C["console"], fg=C["text_h"], font=("Consolas", 7), bd=0, padx=5, pady=5)
+        shell = tk.Frame(self, bg=C["bg"], padx=12, pady=12)
+        shell.pack(fill="both", expand=True)
+
+        top = tk.Frame(shell, bg=C["surface"], padx=14, pady=14, highlightthickness=1, highlightbackground=C["border"])
+        top.pack(fill="x")
+        tk.Label(top, text=self.model, font=FONT_TITLE, bg=C["surface"], fg=C["text"]).pack(anchor="w")
+        tk.Label(top, text=self.email, font=FONT_SMALL, bg=C["surface"], fg=C["accent"]).pack(anchor="w", pady=(2, 0))
+        tk.Label(top, text=self.serial, font=FONT_TINY, bg=C["surface"], fg=C["muted"]).pack(anchor="w", pady=(4, 0))
+
+        stats = tk.Frame(shell, bg=C["bg"])
+        stats.pack(fill="x", pady=10)
+        stats.grid_columnconfigure((0, 1), weight=1)
+        self.lbl_cycles = self._metric_block(stats, "Ciclos", "0", C["success"], 0, 0)
+        self.lbl_profit = self._metric_block(stats, "Pontos hoje", "+0", C["accent"], 0, 1)
+        self.lbl_time = self._metric_block(stats, "Tempo", "00:00:00", C["accent_alt"], 1, 0)
+        self.lbl_profit_brl = self._metric_block(stats, "Lucro BRL", "R$ 0,00", C["warning"], 1, 1)
+
+        self.status_lbl = tk.Label(shell, text="Status: iniciando...", font=FONT_SMALL, bg=C["bg"], fg=C["warning"], anchor="w")
+        self.status_lbl.pack(fill="x", pady=(0, 8))
+
+        log_wrap = tk.Frame(shell, bg=C["surface"], padx=1, pady=1, highlightthickness=1, highlightbackground=C["border"])
+        log_wrap.pack(fill="both", expand=True)
+        self.console = tk.Text(log_wrap, height=12, state="disabled", bg=C["console"], fg=C["muted"], font=("Consolas", 8), bd=0, padx=8, pady=8, insertbackground=C["text"])
         self.console.pack(fill="both", expand=True)
 
     def log(self, msg, level="info"):
-        if not self.winfo_exists(): return
+        if not self.winfo_exists():
+            return
         self.console.config(state="normal")
-        ts = datetime.now().strftime("[%H:%M] ")
-        self.console.insert("end", f"{ts}{msg}\n")
+        self.console.insert("end", f"[{datetime.now():%H:%M}] {msg}\n")
         self.console.see("end")
         self.console.config(state="disabled")
-        
+
     def update_stats(self, stats):
-        if not self.winfo_exists(): return
+        if not self.winfo_exists():
+            return
+        profit = stats.get("profit", 0)
+        brl = CryptoConverter.coins_to_brl(profit)
         self.lbl_cycles.config(text=str(stats.get("cycles", 0)))
-        p = stats.get('profit', 0)
-        self.lbl_profit.config(text=f"+{p:,}".replace(',', '.'))
-        brl = CryptoConverter.coins_to_brl(p)
-        self.lbl_profit_brl.config(text=f"R$ {brl:,.4f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
-        self.lbl_time.config(text=stats.get('elapsed', "00:00:00"))
-        self.status_lbl.config(text="Status: Ativo", fg=C["success"])
+        self.lbl_profit.config(text=f"+{profit:,}".replace(",", "."))
+        self.lbl_time.config(text=stats.get("elapsed", "00:00:00"))
+        self.lbl_profit_brl.config(text=f"R$ {brl:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        self.status_lbl.config(text="Status: ativo", fg=C["success"])
 
     def on_finish(self):
         self.is_active = False
         if self.winfo_exists():
-            self.status_lbl.config(text="Status: Finalizado", fg=C["danger"])
+            self.status_lbl.config(text="Status: finalizado", fg=C["danger"])
+
 
 class SpinGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPINBOT - v0.4.0 (Multi-Instance)")
-        self.root.geometry("950x700")
+        self.root.title(f"SpinBot v{APP_VERSION}")
+        self.root.geometry("1180x760")
+        self.root.minsize(1024, 680)
         self.root.configure(bg=C["bg"])
-        self.root.minsize(850, 600)
 
-        # Ícone
-        try:
-            icon_path = resource_path("icon.png")
-            if os.path.exists(icon_path):
-                img = tk.PhotoImage(file=icon_path)
-                self.root.iconphoto(True, img)
-        except: pass
-
-        # Variáveis de Estado
         self.log_queue = queue.Queue()
-        self.is_running = False
         self.stop_event = threading.Event()
-        
+
         self.selected_device = tk.StringVar()
-        self.email_faucet = tk.StringVar(value="seuemail@exemplo.com")
         self.adb_ip = tk.StringVar(value="127.0.0.1:5555")
-        
-        self.device_vars = {} # Dicionário serial -> tk.BooleanVar
         self.ultra_eco = tk.BooleanVar(value=False)
-        
-        # Timer e Estatísticas persistentes na UI
+
+        self.is_running = False
         self.session_start = None
         self.last_profit = 0
+        self.instances = []
+        self.device_vars = {}
+        self.instance_stats = {}
+        self.reports_dirty = True
 
-        # Configuração do Grid
-        self.root.grid_columnconfigure(0, weight=0) # Barra lateral fixa
-        self.root.grid_columnconfigure(1, weight=1) # Conteúdo expande
-        self.root.grid_rowconfigure(0, weight=1)
-
-        # Sidebar
-        self._build_sidebar()
-
-        # Content Area
-        self.content_frame = tk.Frame(self.root, bg=C["bg"])
-        self.content_frame.grid(row=0, column=1, sticky="nsew", padx=15, pady=15)
-        self.content_frame.grid_columnconfigure(0, weight=1)
-        self.content_frame.grid_rowconfigure(0, weight=1)
-
-        # Views
-        self.views = {}
+        self._setup_window_icon()
+        self._configure_styles()
+        self._build_layout()
         self._init_views()
-        
+
         self.root.after(100, self._poll_logs)
-        self.root.after(1000, self._tick) # Timer real-time
+        self.root.after(1000, self._tick)
         self._refresh_devs()
         self._show_view("home")
 
-    def _build_sidebar(self):
-        self.sidebar = tk.Frame(self.root, bg=C["sidebar"], width=200)
-        self.sidebar.grid(row=0, column=0, sticky="ns")
+    def _setup_window_icon(self):
+        try:
+            icon_path = resource_path("icon.png")
+            if os.path.exists(icon_path):
+                icon = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(True, icon)
+                self._icon_ref = icon
+        except Exception:
+            self._icon_ref = None
+
+    def _configure_styles(self):
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(
+            "Spin.TCombobox",
+            fieldbackground=C["surface_alt"],
+            background=C["surface_alt"],
+            foreground=C["text"],
+            bordercolor=C["border"],
+            lightcolor=C["border"],
+            darkcolor=C["border"],
+            arrowcolor=C["text"],
+        )
+
+    def _build_layout(self):
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
+
+        self.sidebar = tk.Frame(self.root, bg=C["panel"], width=290)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
 
-        tk.Label(self.sidebar, text="SPINBOT", font=("Segoe UI", 16, "bold"), 
-                 bg=C["sidebar"], fg=C["text"], pady=20).pack(fill="x")
+        self.content_frame = tk.Frame(self.root, bg=C["bg"])
+        self.content_frame.grid(row=0, column=1, sticky="nsew", padx=18, pady=18)
+        self.content_frame.grid_columnconfigure(0, weight=1)
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        self._build_sidebar()
+
+    def _build_sidebar(self):
+        brand = tk.Frame(self.sidebar, bg=C["surface"], padx=18, pady=18, highlightthickness=1, highlightbackground=C["border"])
+        brand.pack(fill="x", padx=16, pady=(16, 12))
+        tk.Label(brand, text="SpinBot", font=FONT_HERO, bg=C["surface"], fg=C["text"]).pack(anchor="w")
+        tk.Label(brand, text="Painel de controle para multiplas instancias e monitoramento em tempo real.", font=FONT_SMALL, bg=C["surface"], fg=C["muted"], justify="left", wraplength=230).pack(anchor="w", pady=(8, 0))
+
+        quick = tk.Frame(self.sidebar, bg=C["panel"])
+        quick.pack(fill="x", padx=16)
+        self.summary_cards = {
+            "devices": self._build_sidebar_stat(quick, "Dispositivos", "0"),
+            "emails": self._build_sidebar_stat(quick, "Emails", "0"),
+        }
 
         self.nav_btns = {}
-        self._add_nav_btn("home", "📊 Dashboard", lambda: self._show_view("home"))
-        self._add_nav_btn("predictions", "📈 Projeções", lambda: self._show_predictions())
-        self._add_nav_btn("reports", "📊 Relatórios", lambda: self._show_reports())
-        self._add_nav_btn("settings", "⚙️ Configurações", lambda: self._show_view("settings"))
-        self._add_nav_btn("console", "🖥️ Console", lambda: self._show_view("console"))
+        self._add_nav_btn("home", "Dashboard")
+        self._add_nav_btn("predictions", "Projecoes")
+        self._add_nav_btn("reports", "Relatorios")
+        self._add_nav_btn("settings", "Configuracoes")
+        self._add_nav_btn("console", "Console")
 
-        # Lista de Emails (Múltiplas Contas - 1 por linha)
-        tk.Label(self.sidebar, text="Lista de Emails (1 por linha):", font=("Segoe UI", 9, "bold"), 
-                 bg=C["sidebar"], fg=C["text_h"]).pack(pady=(20, 2), padx=15, anchor="w")
-        
-        entry_container = tk.Frame(self.sidebar, bg=C["border"], padx=1, pady=1)
-        entry_container.pack(pady=(0, 10), padx=15, fill="both", expand=True)
-        
-        self.txt_emails = scrolledtext.ScrolledText(entry_container, bg=C["card"], fg="white", 
-                                                  insertbackground="white", bd=0, font=("Segoe UI", 9),
-                                                  highlightthickness=0, relief="flat", height=5)
-        self.txt_emails.pack(fill="both", expand=True, padx=2, pady=2)
-        
-        # Preencher com info anterior
-        from stats_manager import manager
-        last_emails = list(manager.get_all_stats().keys())
-        if last_emails: 
-            self.txt_emails.insert("1.0", "\n".join(last_emails))
+        email_card = tk.Frame(self.sidebar, bg=C["surface"], padx=16, pady=16, highlightthickness=1, highlightbackground=C["border"])
+        email_card.pack(fill="both", expand=True, padx=16, pady=(8, 16))
+        tk.Label(email_card, text="Emails de trabalho", font=FONT_SUBTITLE, bg=C["surface"], fg=C["text"]).pack(anchor="w")
+        tk.Label(email_card, text="Use um email por linha. Os primeiros emails serao associados aos dispositivos selecionados.", font=FONT_TINY, bg=C["surface"], fg=C["muted"], justify="left", wraplength=230).pack(anchor="w", pady=(6, 10))
 
-        tk.Label(self.sidebar, text="v0.4.0 (Multi-Instance)", font=("Segoe UI", 8), 
-                 bg=C["sidebar"], fg=C["text_h"]).pack(side="bottom", pady=10)
+        text_wrap = tk.Frame(email_card, bg=C["surface_soft"], padx=1, pady=1)
+        text_wrap.pack(fill="both", expand=True)
+        self.txt_emails = scrolledtext.ScrolledText(text_wrap, height=8, bg=C["surface_alt"], fg=C["text"], insertbackground=C["text"], bd=0, wrap="word", font=FONT_BODY, padx=10, pady=10, highlightthickness=0)
+        self.txt_emails.pack(fill="both", expand=True)
 
-    def _add_nav_btn(self, key, text, command):
-        btn = tk.Button(self.sidebar, text=text, command=command,
-                        bg=C["sidebar"], fg=C["text_h"],
-                        font=("Segoe UI", 10), bd=0, activebackground=C["active"],
-                        activeforeground="white", cursor="hand2", anchor="w", padx=15, pady=8)
-        btn.pack(fill="x", pady=1)
+        previous_emails = list(manager.get_all_stats().keys())
+        if previous_emails:
+            self.txt_emails.insert("1.0", "\n".join(previous_emails))
+
+        tk.Label(self.sidebar, text=f"SpinBot v{APP_VERSION}", font=FONT_TINY, bg=C["panel"], fg=C["muted"]).pack(side="bottom", pady=(0, 14))
+
+    def _build_sidebar_stat(self, parent, title, value):
+        card = tk.Frame(parent, bg=C["surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=C["border"])
+        card.pack(fill="x", pady=4)
+        tk.Label(card, text=title.upper(), font=FONT_TINY, bg=C["surface"], fg=C["muted"]).pack(anchor="w")
+        label = tk.Label(card, text=value, font=("Bahnschrift", 18, "bold"), bg=C["surface"], fg=C["accent_alt"])
+        label.pack(anchor="w", pady=(4, 0))
+        return label
+
+    def _add_nav_btn(self, key, text):
+        btn = tk.Button(self.sidebar, text=text, command=lambda item=key: self._show_view(item), bg=C["panel"], fg=C["muted"], activebackground=C["surface"], activeforeground=C["text"], relief="flat", bd=0, cursor="hand2", anchor="w", padx=18, pady=11, font=FONT_BODY)
+        btn.pack(fill="x", padx=16, pady=2)
         self.nav_btns[key] = btn
 
     def _init_views(self):
-        self.views["home"] = self._create_home_view()
-        self.views["predictions"] = self._create_predictions_view()
-        self.views["settings"] = self._create_settings_view()
-        self.views["console"] = self._create_console_view()
-        self.views["reports"] = self._create_reports_view()
+        self.views = {
+            "home": self._create_home_view(),
+            "predictions": self._create_predictions_view(),
+            "reports": self._create_reports_view(),
+            "settings": self._create_settings_view(),
+            "console": self._create_console_view(),
+        }
 
-    def _tick(self):
-        """Cronômetro real-time na UI independente do bot."""
-        if self.is_running and self.session_start:
-            elapsed = datetime.now() - self.session_start
-            self.lbl_time.config(text=str(elapsed).split('.')[0])
-            # Atualiza projeções a cada tick se estiver na aba
-            self._update_predictions(self.last_profit, str(elapsed).split('.')[0])
-        
-        self.root.after(1000, self._tick)
-
-    def _show_view(self, view_name):
-        for k, btn in self.nav_btns.items():
-            if k == view_name:
-                btn.configure(bg=C["active"], fg="white")
-            else:
-                btn.configure(bg=C["sidebar"], fg=C["text_h"])
-        
-        frame = self.views.get(view_name)
-        if frame:
-            frame.tkraise()
-
-    # ── VIEWS IMPLEMENTATION ────────────────────────────────
+    def _make_card(self, parent, title=None, subtitle=None, padding=16):
+        card = tk.Frame(parent, bg=C["surface"], padx=padding, pady=padding, highlightthickness=1, highlightbackground=C["border"])
+        if title:
+            tk.Label(card, text=title, font=FONT_TITLE, bg=C["surface"], fg=C["text"]).pack(anchor="w")
+        if subtitle:
+            tk.Label(card, text=subtitle, font=FONT_SMALL, bg=C["surface"], fg=C["muted"], wraplength=720, justify="left").pack(anchor="w", pady=(5, 0))
+        return card
 
     def _create_home_view(self):
-        f = tk.Frame(self.content_frame, bg=C["bg"])
-        f.grid(row=0, column=0, sticky="nsew")
-        f.grid_columnconfigure(0, weight=1)
-        
-        header = tk.Frame(f, bg=C["bg"])
-        header.pack(fill="x", pady=(0, 10))
-        tk.Label(header, text="Dashboard", font=("Segoe UI", 14, "bold"), bg=C["bg"], fg=C["text"]).pack(side="left")
-        
-        tk.Button(header, text="↻ Atualizar Dispositivos", command=self._refresh_devs, 
-                  bg=C["sidebar"], fg=C["text_h"], font=("Segoe UI", 8), bd=0, padx=10, cursor="hand2").pack(side="right")
+        frame = tk.Frame(self.content_frame, bg=C["bg"])
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.grid_columnconfigure(0, weight=1)
 
-        # Seleção de Instâncias (Solicitação do Usuário)
-        sel_container = tk.LabelFrame(f, text="SELECIONE AS INSTÂNCIAS PARA TRABALHAR", bg=C["bg"], fg=C["accent"], 
-                                    font=("Segoe UI", 8, "bold"), bd=0)
-        sel_container.pack(fill="x", pady=(0, 15))
-        
-        self.device_list_frame = tk.Frame(sel_container, bg=C["sidebar"], padx=10, pady=10)
-        self.device_list_frame.pack(fill="x")
-        
-        # Opções de Otimização
-        opt_frame = tk.Frame(f, bg=C["bg"])
-        opt_frame.pack(fill="x", pady=(0, 10))
-        
-        tk.Checkbutton(opt_frame, text="🍀 MODO ULTRA-ECO (Reduzir resolução/DPI p/ economizar CPU/GPU)", 
-                       variable=self.ultra_eco, bg=C["bg"], fg=C["success"], 
-                       selectcolor=C["bg"], activebackground=C["bg"],
-                       activeforeground=C["success"], font=("Segoe UI", 8, "bold"),
-                       bd=0, cursor="hand2").pack(side="left")
-        
-        # Botão Principal
-        self.btn_main = tk.Button(f, text="INICIAR AUTOMAÇÃO", command=self._toggle_run,
-                                  bg=C["accent"], fg="white", font=("Segoe UI", 12, "bold"),
-                                  bd=0, cursor="hand2", activebackground=C["accent_h"], pady=12)
-        self.btn_main.pack(fill="x", pady=5)
+        hero = self._make_card(frame, "Operacao central", "Escolha as instancias, acompanhe os numeros do dia e inicie a automacao em lote.", padding=18)
+        hero.pack(fill="x", pady=(0, 14))
 
-        # Stats Container (Grid)
-        stats_frame = tk.Frame(f, bg=C["card"], padx=15, pady=15)
-        stats_frame.pack(fill="x", pady=10)
-        stats_frame.columnconfigure(0, weight=1)
-        stats_frame.columnconfigure(1, weight=1)
+        actions = tk.Frame(hero, bg=C["surface"])
+        actions.pack(fill="x", pady=(16, 0))
+        self.btn_main = tk.Button(actions, text="Iniciar automacao", command=self._toggle_run, bg=C["accent"], fg=C["bg"], activebackground=C["success"], activeforeground=C["bg"], relief="flat", bd=0, cursor="hand2", padx=18, pady=12, font=FONT_SUBTITLE)
+        self.btn_main.pack(side="left")
+        tk.Button(actions, text="Atualizar dispositivos", command=self._refresh_devs, bg=C["surface_soft"], fg=C["text"], activebackground=C["surface_alt"], activeforeground=C["text"], relief="flat", bd=0, cursor="hand2", padx=16, pady=12, font=FONT_BODY).pack(side="left", padx=10)
+        tk.Checkbutton(actions, text="Modo ultra-eco", variable=self.ultra_eco, bg=C["surface"], fg=C["success"], activebackground=C["surface"], activeforeground=C["success"], selectcolor=C["surface"], cursor="hand2", font=FONT_BODY, bd=0).pack(side="right")
 
-        # Ciclos
-        f_cycles = tk.Frame(stats_frame, bg=C["card"])
-        f_cycles.grid(row=0, column=0, sticky="nw")
-        tk.Label(f_cycles, text="CICLOS TOTAIS", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_cycles = tk.Label(f_cycles, text="0", font=("Segoe UI", 24, "bold"), bg=C["card"], fg=C["success"])
-        self.lbl_cycles.pack(anchor="w")
+        devices_card = self._make_card(frame, "Instancias selecionadas", "Marque quais dispositivos entram na rodada atual.")
+        devices_card.pack(fill="x", pady=(0, 14))
+        self.device_list_frame = tk.Frame(devices_card, bg=C["surface"])
+        self.device_list_frame.pack(fill="x", pady=(12, 0))
 
-        # Ganho Session
-        f_profit = tk.Frame(stats_frame, bg=C["card"])
-        f_profit.grid(row=0, column=1, sticky="nw")
-        tk.Label(f_profit, text="PONTOS TOTAIS HOJE", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_profit = tk.Label(f_profit, text="+0", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["success"])
-        self.lbl_profit.pack(anchor="w")
+        metrics = tk.Frame(frame, bg=C["bg"])
+        metrics.pack(fill="x", pady=(0, 14))
+        metrics.grid_columnconfigure((0, 1), weight=1)
+        self.lbl_cycles = self._build_metric_card(metrics, "Ciclos totais", "0", C["accent_alt"], 0, 0)
+        self.lbl_profit = self._build_metric_card(metrics, "Pontos totais hoje", "+0", C["success"], 0, 1)
+        self.lbl_time = self._build_metric_card(metrics, "Tempo de sessao", "00:00:00", C["warning"], 1, 0)
+        self.lbl_profit_brl = self._build_metric_card(metrics, "Lucro em BRL", "R$ 0,00", C["accent"], 1, 1)
 
-        # Ganho BRL
-        f_brl = tk.Frame(stats_frame, bg=C["card"])
-        f_brl.grid(row=1, column=1, sticky="nw", pady=(15, 0))
-        tk.Label(f_brl, text="LUCRO TOTAL BRL", font=("Segoe UI", 8, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_profit_brl = tk.Label(f_brl, text="R$ 0,00", font=("Segoe UI", 18, "bold"), bg=C["card"], fg=C["success"])
-        self.lbl_profit_brl.pack(anchor="w")
+        self.status_badge = tk.Label(frame, text="Aguardando inicio", bg=C["surface_soft"], fg=C["text"], padx=12, pady=8, font=FONT_BODY)
+        self.status_badge.pack(anchor="w", pady=(0, 14))
 
-        # Tempo de Execução
-        f_time = tk.Frame(stats_frame, bg=C["card"])
-        f_time.grid(row=1, column=0, sticky="nw", pady=(15, 0))
-        tk.Label(f_time, text="TEMPO DE SESSÃO", font=("Segoe UI", 9, "bold"), bg=C["card"], fg=C["text_h"]).pack(anchor="w")
-        self.lbl_time = tk.Label(f_time, text="00:00:00", font=("Segoe UI", 24, "bold"), bg=C["card"], fg=C["accent"])
-        self.lbl_time.pack(anchor="w")
+        activity = self._make_card(frame, "Ultimas atividades", "Eventos recentes de todas as instancias em uma unica linha do tempo.")
+        activity.pack(fill="both", expand=True)
+        self.mini_log = tk.Text(activity, height=8, state="disabled", bg=C["console"], fg=C["muted"], font=FONT_MONO, bd=0, padx=10, pady=10, insertbackground=C["text"])
+        self.mini_log.pack(fill="both", expand=True, pady=(12, 0))
+        return frame
 
-        # Status
-        self.status_lbl = tk.Label(stats_frame, text="Status: Aguardando...", font=("Segoe UI", 9), bg=C["card"], fg=C["text_h"])
-        self.status_lbl.grid(row=2, column=0, columnspan=2, sticky="sw", pady=(20,0))
-        
-        # Mini Console
-        log_frame = tk.LabelFrame(f, text="Últimas Atividades", bg=C["bg"], fg=C["text_h"], bd=0, font=("Segoe UI", 9))
-        log_frame.pack(fill="both", expand=True, pady=10)
-        
-        self.mini_log = tk.Text(log_frame, height=5, state="disabled", bg=C["console"], fg=C["text_h"],
-                                font=("Consolas", 8), bd=0, padx=5, pady=5)
-        self.mini_log.pack(fill="both", expand=True)
-
-        return f
+    def _build_metric_card(self, parent, title, value, color, row, column):
+        card = tk.Frame(parent, bg=C["surface"], padx=16, pady=16, highlightthickness=1, highlightbackground=C["border"])
+        card.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
+        tk.Label(card, text=title.upper(), font=FONT_TINY, bg=C["surface"], fg=C["muted"]).pack(anchor="w")
+        label = tk.Label(card, text=value, font=("Bahnschrift", 24, "bold"), bg=C["surface"], fg=color)
+        label.pack(anchor="w", pady=(8, 0))
+        return label
 
     def _create_settings_view(self):
-        f = tk.Frame(self.content_frame, bg=C["bg"])
-        f.grid(row=0, column=0, sticky="nsew")
-        tk.Label(f, text="Configurações", font=("Segoe UI", 14, "bold"), bg=C["bg"], fg=C["text"]).pack(anchor="w", pady=(0, 20))
+        frame = tk.Frame(self.content_frame, bg=C["bg"])
+        frame.grid(row=0, column=0, sticky="nsew")
 
-        # Grupo: Dispositivo
-        self._build_setting_group(f, "Dispositivo & Conexão", [
-            ("combo_refresh", "Selecione o Dispositivo:", self.selected_device, self._refresh_devs),
-            ("entry_btn", "ADB Remoto (IP:Porta):", self.adb_ip, "Conectar", self._connect_adb)
-        ])
-        
-        # Grupo: Conta (Removed as email is now in sidebar)
-        # self._build_setting_group(f, "Conta Faucet", [
-        #     ("entry", "E-mail de Login:", self.email_faucet)
-        # ])
-        
-        # Ferramentas
-        tools_frame = tk.LabelFrame(f, text="Ferramentas Avançadas", bg=C["bg"], fg=C["accent"], 
-                                   font=("Segoe UI", 9, "bold"), bd=1, relief="flat", padx=10, pady=10)
-        tools_frame.pack(fill="x", pady=10)
-        tk.Button(tools_frame, text="Recalibrar Tela", command=self._start_calib,
-                  bg=C["sidebar"], fg=C["text"], bd=0, padx=15, pady=8, cursor="hand2").pack(anchor="w")
+        connection = self._make_card(frame, "Conexao e dispositivo", "Atualize a lista local ou conecte um ADB remoto sem sair do painel.")
+        connection.pack(fill="x", pady=(0, 14))
+        tk.Label(connection, text="Dispositivo padrao", font=FONT_BODY, bg=C["surface"], fg=C["muted"]).pack(anchor="w", pady=(12, 6))
 
-        return f
+        combo_row = tk.Frame(connection, bg=C["surface"])
+        combo_row.pack(fill="x")
+        self.combo_dev = ttk.Combobox(combo_row, textvariable=self.selected_device, state="readonly", style="Spin.TCombobox")
+        self.combo_dev.pack(side="left", fill="x", expand=True, ipady=5)
+        tk.Button(combo_row, text="Atualizar", command=self._refresh_devs, bg=C["surface_soft"], fg=C["text"], relief="flat", bd=0, cursor="hand2", padx=12, pady=8, font=FONT_BODY).pack(side="left", padx=(8, 0))
 
-    def _build_setting_group(self, parent, title, items):
-        frame = tk.LabelFrame(parent, text=title, bg=C["bg"], fg=C["accent"], 
-                              font=("Segoe UI", 9, "bold"), bd=0, padx=0, pady=10)
-        frame.pack(fill="x", pady=5)
-        
-        for item in items:
-            type_ = item[0]
-            label_text = item[1]
-            tk.Label(frame, text=label_text, bg=C["bg"], fg=C["text_h"], font=("Segoe UI", 9)).pack(anchor="w", pady=(5, 2))
-            
-            if type_ == "combo_refresh":
-                box = tk.Frame(frame, bg=C["bg"])
-                box.pack(fill="x")
-                self.combo_dev = ttk.Combobox(box, textvariable=item[2], state="readonly")
-                self.combo_dev.pack(side="left", fill="x", expand=True, ipady=4)
-                tk.Button(box, text="↻", command=item[3], bg=C["sidebar"], fg="white", bd=0, padx=10).pack(side="left", padx=5)
-            
-            elif type_ == "entry":
-                tk.Entry(frame, textvariable=item[2], bg=C["sidebar"], fg="white", 
-                         insertbackground="white", bd=0).pack(fill="x", ipady=7)
-                
-            elif type_ == "entry_btn":
-                box = tk.Frame(frame, bg=C["bg"])
-                box.pack(fill="x")
-                tk.Entry(box, textvariable=item[2], bg=C["sidebar"], fg="white", 
-                         insertbackground="white", bd=0).pack(side="left", fill="x", expand=True, ipady=7)
-                tk.Button(box, text=item[3], command=item[4], bg=C["active"], fg="white", bd=0, padx=15).pack(side="left", padx=5)
+        tk.Label(connection, text="ADB remoto (IP:porta)", font=FONT_BODY, bg=C["surface"], fg=C["muted"]).pack(anchor="w", pady=(14, 6))
+        adb_row = tk.Frame(connection, bg=C["surface"])
+        adb_row.pack(fill="x")
+        tk.Entry(adb_row, textvariable=self.adb_ip, bg=C["surface_alt"], fg=C["text"], insertbackground=C["text"], relief="flat", bd=0, font=FONT_BODY).pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 8))
+        tk.Button(adb_row, text="Conectar", command=self._connect_adb, bg=C["accent_alt"], fg=C["bg"], relief="flat", bd=0, cursor="hand2", padx=16, pady=8, font=FONT_BODY).pack(side="left")
+
+        tools = self._make_card(frame, "Ferramentas avancadas", "Use a calibracao para ajustar leitura e clique em dispositivos com resolucoes diferentes.")
+        tools.pack(fill="x")
+        tk.Button(tools, text="Recalibrar tela", command=self._start_calib, bg=C["surface_soft"], fg=C["text"], relief="flat", bd=0, cursor="hand2", padx=16, pady=10, font=FONT_BODY).pack(anchor="w", pady=(12, 0))
+        return frame
 
     def _create_console_view(self):
-        f = tk.Frame(self.content_frame, bg=C["bg"])
-        f.grid(row=0, column=0, sticky="nsew")
-        f.grid_rowconfigure(1, weight=1)
-        f.grid_columnconfigure(0, weight=1)
-        
-        tk.Label(f, text="Console de Logs", font=("Segoe UI", 12, "bold"), bg=C["bg"], fg=C["text"]).grid(row=0, column=0, sticky="w", pady=(0, 10))
-        
-        self.txt_log = scrolledtext.ScrolledText(f, state="disabled", bg=C["console"], fg=C["text_h"],
-                                                font=("Consolas", 9), bd=0, padx=10, pady=10)
-        self.txt_log.grid(row=1, column=0, sticky="nsew")
-        
-        self.txt_log.tag_config("info", foreground=C["text_h"])
+        frame = tk.Frame(self.content_frame, bg=C["bg"])
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        card = self._make_card(frame, "Console consolidado", "Logs completos das automacoes em execucao.")
+        card.grid(row=0, column=0, sticky="nsew")
+        self.txt_log = scrolledtext.ScrolledText(card, state="disabled", bg=C["console"], fg=C["muted"], font=FONT_MONO, bd=0, padx=12, pady=12, insertbackground=C["text"])
+        self.txt_log.pack(fill="both", expand=True, pady=(12, 0))
+
+        self.txt_log.tag_config("info", foreground=C["muted"])
         self.txt_log.tag_config("header", foreground=C["text"], font=("Consolas", 10, "bold"))
         self.txt_log.tag_config("success", foreground=C["success"])
         self.txt_log.tag_config("warning", foreground=C["warning"])
         self.txt_log.tag_config("error", foreground=C["danger"])
-        self.txt_log.tag_config("action", foreground=C["accent_h"])
-        
-        return f
+        self.txt_log.tag_config("action", foreground=C["accent_alt"])
+        return frame
 
     def _create_predictions_view(self):
-        f = tk.Frame(self.content_frame, bg=C["bg"])
-        f.grid(row=0, column=0, sticky="nsew")
-        
-        tk.Label(f, text="Projeção de Ganhos", font=("Segoe UI", 14, "bold"), 
-                 bg=C["bg"], fg=C["text"]).pack(anchor="w", pady=(0, 20))
-        
-        self.pred_frame = tk.Frame(f, bg=C["card"], padx=20, pady=20)
-        self.pred_frame.pack(fill="x")
-        
+        frame = tk.Frame(self.content_frame, bg=C["bg"])
+        frame.grid(row=0, column=0, sticky="nsew")
+
+        card = self._make_card(frame, "Projecoes", "Estimativas dinamicas a partir do ritmo atual da sessao. Os valores estabilizam apos o primeiro minuto.")
+        card.pack(fill="x")
+
         self.pred_labels = {}
-        for period in ["1 Hora", "12 Horas", "1 Dia", "1 Semana", "1 Mês"]:
-            row = tk.Frame(self.pred_frame, bg=C["card"])
-            row.pack(fill="x", pady=8)
-            tk.Label(row, text=period, font=("Segoe UI", 10), bg=C["card"], fg=C["text_h"]).pack(side="left")
-            lbl = tk.Label(row, text="Calculando...", font=("Segoe UI", 11, "bold"), bg=C["card"], fg=C["success"])
-            lbl.pack(side="right")
-            self.pred_labels[period] = lbl
-        
-        tk.Label(f, text="* Estimativas baseadas no lucro da sessão atual.", 
-                 font=("Segoe UI", 8, "italic"), bg=C["bg"], fg=C["text_h"]).pack(anchor="w", pady=10)
-        
-        return f
-
-    def _update_predictions(self, profit, elapsed_str):
-        try:
-            h, m, s = map(int, elapsed_str.split(':'))
-            total_seconds = h*3600 + m*60 + s
-            if total_seconds < 60: return # Aguarda 1 min para média estável
-            
-            rate = profit / total_seconds
-            
-            times = {
-                "1 Hora": 3600,
-                "12 Horas": 43200,
-                "1 Dia": 86400,
-                "1 Semana": 604800,
-                "1 Mês": 2592000
-            }
-            
-            for k, sec in times.items():
-                val = int(rate * sec)
-                self.pred_labels[k].config(text=f"+{val:,}".replace(',', '.'))
-        except: pass
-
-    def _show_predictions(self):
-        self._show_view("predictions")
+        for period in ["1 Hora", "12 Horas", "1 Dia", "1 Semana", "1 Mes"]:
+            row = tk.Frame(card, bg=C["surface_alt"], padx=14, pady=12, highlightthickness=1, highlightbackground=C["border"])
+            row.pack(fill="x", pady=5)
+            tk.Label(row, text=period, font=FONT_SUBTITLE, bg=C["surface_alt"], fg=C["text"]).pack(side="left")
+            label = tk.Label(row, text="Calculando...", font=("Bahnschrift", 16, "bold"), bg=C["surface_alt"], fg=C["success"])
+            label.pack(side="right")
+            self.pred_labels[period] = label
+        return frame
 
     def _create_reports_view(self):
-        f = tk.Frame(self.content_frame, bg=C["bg"])
-        f.grid(row=0, column=0, sticky="nsew")
-        f.grid_columnconfigure(0, weight=1)
-        f.grid_rowconfigure(1, weight=1)
-        
-        tk.Label(f, text="Relatório Diário de Ganhos", font=("Segoe UI", 14, "bold"), 
-                 bg=C["bg"], fg=C["text"]).grid(row=0, column=0, sticky="w", pady=(0, 15))
-        
-        self.reports_text = tk.Text(f, bg=C["console"], fg=C["text_h"], 
-                                   font=("Consolas", 11), bd=0, padx=15, pady=15)
-        self.reports_text.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
-        
-        btn_refresh = tk.Button(f, text="Atualizar Relatório", command=self._update_reports_text,
-                                  bg=C["accent"], fg="white", font=("Segoe UI", 10, "bold"),
-                                  bd=0, cursor="hand2", activebackground=C["accent_h"], pady=8)
-        btn_refresh.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        
-        return f
+        frame = tk.Frame(self.content_frame, bg=C["bg"])
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
 
-    def _update_reports_text(self):
-        stats = manager.get_all_stats()
-        self.reports_text.config(state="normal")
-        self.reports_text.delete("1.0", tk.END)
-        
-        self.reports_text.insert(tk.END, f"--- LUCROS DE HOJE ({manager.data['last_reset']}) ---\n\n", "header")
-        total = 0
-        if not stats:
-            self.reports_text.insert(tk.END, "Nenhum dado registrado hoje ainda.\n\n", "info")
-        else:
-            for email, profit in stats.items():
-                self.reports_text.insert(tk.END, f"📧 {email}\n", "info")
-                self.reports_text.insert(tk.END, f"💰 Ganho: +{profit:,}\n\n".replace(',', '.'), "success")
-                total += profit
-        
-        self.reports_text.insert(tk.END, "-"*40 + "\n", "info")
-        self.reports_text.insert(tk.END, f"💲 TOTAL ACUMULADO : +{total:,}\n".replace(',', '.'), "header")
-        self.reports_text.config(state="disabled")
+        card = self._make_card(frame, "Relatorios diarios", "Resumo persistido por conta com total agregado do dia.")
+        card.grid(row=0, column=0, sticky="nsew")
+        self.reports_text = tk.Text(card, bg=C["console"], fg=C["muted"], font=("Consolas", 10), bd=0, padx=12, pady=12, insertbackground=C["text"])
+        self.reports_text.pack(fill="both", expand=True, pady=(12, 10))
+        tk.Button(card, text="Atualizar relatorio", command=self._update_reports_text, bg=C["accent"], fg=C["bg"], relief="flat", bd=0, cursor="hand2", padx=16, pady=10, font=FONT_BODY).pack(anchor="w")
+        return frame
 
-    def _show_reports(self):
-        self._update_reports_text()
-        self._show_view("reports")
-
-    # ── LOGIC ──────────────────────────────────────────────
+    def _show_view(self, view_name):
+        for key, btn in self.nav_btns.items():
+            if key == view_name:
+                btn.configure(bg=C["surface"], fg=C["text"])
+            else:
+                btn.configure(bg=C["panel"], fg=C["muted"])
+        self.views[view_name].tkraise()
+        if view_name == "reports" and self.reports_dirty:
+            self._update_reports_text()
 
     def log(self, msg, level="info"):
         self.log_queue.put((msg, level))
 
     def _poll_logs(self):
-        max_lines = getattr(config, 'MAX_LOG_LINES', 500)
         while not self.log_queue.empty():
             msg, level = self.log_queue.get()
-            
-            if hasattr(self, 'txt_log'):
+
+            if hasattr(self, "txt_log"):
                 self.txt_log.config(state="normal")
-                num_lines = int(self.txt_log.index('end-1c').split('.')[0])
+                max_lines = getattr(config, "MAX_LOG_LINES", 500)
+                num_lines = int(self.txt_log.index("end-1c").split(".")[0])
                 if num_lines > max_lines:
-                    self.txt_log.delete('1.0', f'{num_lines - max_lines + 1}.0')
-                
-                timestamp = datetime.now().strftime("[%H:%M] ")
-                self.txt_log.insert("end", timestamp, "info")
+                    self.txt_log.delete("1.0", f"{num_lines - max_lines + 1}.0")
+                self.txt_log.insert("end", f"[{datetime.now():%H:%M}] ", "info")
                 self.txt_log.insert("end", f"{msg}\n", level)
                 self.txt_log.see("end")
                 self.txt_log.config(state="disabled")
-            
-            if hasattr(self, 'mini_log'):
+
+            if hasattr(self, "mini_log"):
                 self.mini_log.config(state="normal")
-                num_lines = int(self.mini_log.index('end-1c').split('.')[0])
-                if num_lines > 15:
-                    self.mini_log.delete('1.0', '2.0')
-                self.mini_log.insert("end", f"> {msg}\n")
+                num_lines = int(self.mini_log.index("end-1c").split(".")[0])
+                if num_lines > 20:
+                    self.mini_log.delete("1.0", "2.0")
+                self.mini_log.insert("end", f"[{datetime.now():%H:%M}] {msg}\n")
                 self.mini_log.see("end")
                 self.mini_log.config(state="disabled")
-        
+
         self.root.after(100, self._poll_logs)
 
+    def _tick(self):
+        if self.is_running and self.session_start:
+            elapsed = str(datetime.now() - self.session_start).split(".")[0]
+            self.lbl_time.config(text=elapsed)
+            self._update_predictions(self.last_profit, elapsed)
+        self.summary_cards["emails"].config(text=str(len(self._get_emails())))
+        self.root.after(1000, self._tick)
+
     def _toggle_run(self):
-        if not self.is_running:
-            self._start()
-        else:
+        if self.is_running:
             self._stop()
+        else:
+            self._start()
+
+    def _get_emails(self):
+        raw = self.txt_emails.get("1.0", tk.END).strip()
+        return [email.strip() for email in raw.splitlines() if email.strip()]
 
     def _start(self):
-        # 1. Obter dispositivos selecionados
-        selected_serials = [s for s, var in self.device_vars.items() if var.get()]
-        
+        selected_serials = [serial for serial, var in self.device_vars.items() if var.get()]
         if not selected_serials:
-            messagebox.showwarning("Aviso", "Selecione pelo menos uma instância na lista acima para iniciar!")
+            messagebox.showwarning("Aviso", "Selecione pelo menos uma instancia para iniciar.")
+            return
+
+        emails = self._get_emails()
+        if not emails:
+            messagebox.showwarning("Aviso", "Informe pelo menos um email na barra lateral.")
             return
 
         try:
-            all_devices = adbutils.adb.device_list()
-            devices = [d for d in all_devices if d.serial in selected_serials]
-        except Exception as e:
-            messagebox.showerror("Erro ADB", f"Falha ao listar dispositivos: {e}")
+            devices = [device for device in adbutils.adb.device_list() if device.serial in selected_serials]
+        except Exception as exc:
+            messagebox.showerror("Erro ADB", f"Falha ao listar dispositivos: {exc}")
             return
 
-        if not devices:
-            messagebox.showwarning("Aviso", "Dispositivos selecionados não foram encontrados. Tente atualizar a lista.")
-            return
-
-        # 2. Obter emails da lista
-        emails_raw = self.txt_emails.get("1.0", tk.END).strip()
-        emails = [e.strip() for e in emails_raw.split("\n") if e.strip()]
-
-        if not emails:
-            messagebox.showwarning("Aviso", "Insira pelo menos um email na lista lateral!")
-            return
-
-        # 3. Validar contagem
         if len(emails) < len(devices):
-            messagebox.showwarning("Faltam Emails", 
-                f"Você selecionou {len(devices)} dispositivos, mas inseriu apenas {len(emails)} emails.\n"
-                "Adicione mais emails na barra lateral.")
+            messagebox.showwarning("Faltam emails", f"Foram selecionados {len(devices)} dispositivos, mas existem apenas {len(emails)} emails preenchidos.")
             return
 
         self.is_running = True
         self.session_start = datetime.now()
         self.stop_event.clear()
-        self.btn_main.configure(text="PARAR TODAS AS INSTÂNCIAS", bg=C["danger"])
-        self.status_lbl.config(text=f"Status: {len(devices)} Instâncias Ativas", fg=C["success"])
-        
+        self.instance_stats = {}
         self.instances = []
-        for i, dev in enumerate(devices):
-            email = emails[i]
-            serial = dev.serial
-            model = dev.prop.get('ro.product.model', 'Desconhecido')
-            
-            self.log(f"Iniciando Instância #{i+1}: {model} ({serial}) -> {email}", "header")
-            
-            # Criar Janela Individual (Design Compacto)
+
+        self.btn_main.configure(text="Parar automacao", bg=C["danger"], fg=C["text"], activebackground="#ff8585")
+        self.status_badge.config(text=f"{len(devices)} instancia(s) em execucao", bg=C["accent_soft"], fg=C["text"])
+        self.log(f"Iniciando lote com {len(devices)} dispositivo(s).", "header")
+
+        for index, device in enumerate(devices):
+            serial = device.serial
+            model = device.prop.get("ro.product.model", "Desconhecido")
+            email = emails[index]
+
             window = AutomatorWindow(self.root, serial, model, email, self.stop_event)
+            window.geometry(f"+{70 + (index * 34)}+{70 + (index * 34)}")
             self.instances.append(window)
-            
-            # Posicionamento em cascata para não sobrepor tudo de uma vez
-            offset = i * 40
-            window.geometry(f"+{offset}+{offset}")
-            
-            # Iniciar Thread da Automação
-            threading.Thread(
-                target=self._run_instance, 
-                args=(serial, email, window), 
-                daemon=True
-            ).start()
+
+            self.log(f"[{serial}] Instancia criada para {email}", "action")
+            threading.Thread(target=self._run_instance, args=(serial, email, window), daemon=True).start()
 
     def _stop(self):
-        if self.is_running:
-            self.log("Solicitando parada de todas as instâncias...", "warning")
-            self.stop_event.set()
-            self.status_lbl.config(text="Status: Parando...", fg=C["warning"])
+        if not self.is_running:
+            return
+        self.stop_event.set()
+        self.status_badge.config(text="Encerrando instancias...", bg=C["warning"], fg=C["bg"])
+        self.log("Solicitando parada de todas as instancias...", "warning")
 
     def _run_instance(self, serial, email, window):
         def _multi_log(msg, level="info"):
             window.log(msg, level)
             self.log(f"[{serial}] {msg}", level)
 
-        automator = SpinAutomator(
-            serial=serial,
-            account_email=email,
-            stop_event=self.stop_event,
-            on_log=_multi_log,
-            on_stats_update=window.update_stats
-        )
-        
-        # Aplicar otimizações se selecionado
+        def _on_stats(stats):
+            window.update_stats(stats)
+            self._store_instance_stats(serial, stats)
+
+        automator = SpinAutomator(serial=serial, account_email=email, stop_event=self.stop_event, on_log=_multi_log, on_stats_update=_on_stats)
+
         if self.ultra_eco.get():
             from adb_utils import apply_headless_optimizations
             import uiautomator2 as u2
+
             try:
-                d = u2.connect(serial)
-                apply_headless_optimizations(d)
-            except: pass
+                apply_headless_optimizations(u2.connect(serial))
+            except Exception as exc:
+                self.log(f"[{serial}] Falha ao aplicar ultra-eco: {exc}", "warning")
 
         try:
             automator.run()
-        except Exception as e:
-            window.log(f"Erro Crítico na Instância: {e}", "error")
+        except Exception as exc:
+            window.log(f"Erro critico na instancia: {exc}", "error")
+            self.log(f"[{serial}] Erro critico na instancia: {exc}", "error")
         finally:
-            # Restaurar padrões ao sair
             if self.ultra_eco.get():
                 from adb_utils import restore_display_defaults
                 import uiautomator2 as u2
-                try:
-                    d = u2.connect(serial)
-                    restore_display_defaults(d)
-                except: pass
-            
-            self.root.after(0, lambda: self._on_instance_finish(window))
 
-    def _on_instance_finish(self, window):
+                try:
+                    restore_display_defaults(u2.connect(serial))
+                except Exception as exc:
+                    self.log(f"[{serial}] Falha ao restaurar display: {exc}", "warning")
+
+            self.root.after(0, lambda: self._on_instance_finish(window, serial))
+
+    def _store_instance_stats(self, serial, stats):
+        self.instance_stats[serial] = stats
+        self.root.after(0, self._update_aggregate_stats)
+
+    def _update_aggregate_stats(self):
+        cycles = sum(item.get("cycles", 0) for item in self.instance_stats.values())
+        profit = sum(item.get("profit", 0) for item in self.instance_stats.values())
+
+        self.last_profit = profit
+        self.lbl_cycles.config(text=str(cycles))
+        self.lbl_profit.config(text=f"+{profit:,}".replace(",", "."))
+
+        brl_val = CryptoConverter.coins_to_brl(profit)
+        self.lbl_profit_brl.config(text=f"R$ {brl_val:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+        if self.is_running:
+            device_count = len([window for window in self.instances if window.is_active])
+            self.status_badge.config(text=f"{device_count} instancia(s) em execucao", bg=C["accent_soft"], fg=C["text"])
+
+        self.root.title(f"SpinBot v{APP_VERSION} | {cycles} ciclos | +{profit:,}".replace(",", "."))
+
+    def _on_instance_finish(self, window, serial):
         window.on_finish()
-        # Verificar se todas terminaram
-        if all(not w.is_active for w in self.instances):
+        self.instance_stats.pop(serial, None)
+        self._update_aggregate_stats()
+        if all(not item.is_active for item in self.instances):
             self._on_all_finish()
 
     def _on_all_finish(self):
         self.is_running = False
-        self.btn_main.configure(text="INICIAR AUTOMAÇÃO", bg=C["accent"])
-        self.status_lbl.config(text="Status: Processo Finalizado", fg=C["text_h"])
-        self.log("Todas as instâncias foram finalizadas.", "header")
-
-    def _update_stats(self, stats):
-        def _u():
-            if hasattr(self, 'lbl_cycles'):
-                self.lbl_cycles.config(text=str(stats.get("cycles", 0)))
-            if hasattr(self, 'lbl_profit'):
-                profit = stats.get('profit', 0)
-                self.lbl_profit.config(text=f"+{profit:,}".replace(',', '.'))
-                self.last_profit = profit
-                
-                # Atualizar Lucro BRL
-                brl_val = CryptoConverter.coins_to_brl(profit)
-                self.lbl_profit_brl.config(text=f"R$ {brl_val:,.4f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
-            if hasattr(self, 'lbl_balance'):
-                balance = stats.get('current_coins', 0)
-                self.lbl_balance.config(text=f"{balance:,}".replace(',', '.'))
-            
-            # Não atualizamos o timer por aqui mais, o _tick cuida disso
-            # Mas atualizamos as projeções
-            # self._update_predictions(stats.get('profit', 0), stats.get('elapsed', "00:00:00"))
-            
-            dev_str = self.selected_device.get()
-            if dev_str:
-                self.root.title(f"SPINBOT - {dev_str}")
-        self.root.after(0, _u)
+        self.btn_main.configure(text="Iniciar automacao", bg=C["accent"], fg=C["bg"], activebackground=C["success"])
+        self.status_badge.config(text="Processo finalizado", bg=C["surface_soft"], fg=C["text"])
+        self.log("Todas as instancias foram finalizadas.", "header")
+        self.reports_dirty = True
 
     def _refresh_devs(self):
         try:
-            # Limpar lista atual
-            if hasattr(self, 'device_list_frame'):
-                for widget in self.device_list_frame.winfo_children():
-                    widget.destroy()
-            
             devices = adbutils.adb.device_list()
-            vals = []
-            
-            if not devices:
-                if hasattr(self, 'device_list_frame'):
-                    tk.Label(self.device_list_frame, text="Nenhum dispositivo detectado. Verifique o ADB.", 
-                             bg=C["sidebar"], fg=C["danger"], font=("Segoe UI", 9)).pack(pady=5)
-            
-            for i, d in enumerate(devices, 1):
-                model = d.prop.get('ro.product.model', '?')
-                serial = d.serial
-                
-                # Criar variável se não existir
-                if serial not in self.device_vars:
-                    self.device_vars[serial] = tk.BooleanVar(value=True)
-                
-                # Checkbutton estilizado
-                if hasattr(self, 'device_list_frame'):
-                    f_item = tk.Frame(self.device_list_frame, bg=C["sidebar"])
-                    f_item.pack(fill="x", pady=2)
-                    
-                    cb = tk.Checkbutton(f_item, text=f"{i}. {model} ({serial})", 
-                                       variable=self.device_vars[serial],
-                                       bg=C["sidebar"], fg=C["text"], 
-                                       selectcolor=C["bg"], activebackground=C["sidebar"],
-                                       activeforeground=C["accent"], font=("Segoe UI", 9),
-                                       bd=0, cursor="hand2")
-                    cb.pack(side="left")
-                    
-                    label_status = tk.Label(f_item, text="• Online", bg=C["sidebar"], fg=C["success"], font=("Segoe UI", 8))
-                    label_status.pack(side="right", padx=10)
+        except Exception as exc:
+            self.log(f"Falha ao atualizar dispositivos: {exc}", "error")
+            devices = []
 
-                vals.append(f"{i}. {serial} | {model}")
-            
-            # Também atualiza o combo nas configurações por compatibilidade
-            if hasattr(self, 'combo_dev'):
-                self.combo_dev['values'] = vals
-                if vals: self.combo_dev.current(0)
-                
-        except Exception as e:
-            print(f"Erro ao atualizar dispositivos: {e}")
+        if hasattr(self, "device_list_frame"):
+            for child in self.device_list_frame.winfo_children():
+                child.destroy()
+
+        combo_values = []
+        self.summary_cards["devices"].config(text=str(len(devices)))
+
+        if not devices and hasattr(self, "device_list_frame"):
+            tk.Label(self.device_list_frame, text="Nenhum dispositivo detectado. Verifique o ADB.", bg=C["surface"], fg=C["danger"], font=FONT_BODY).pack(anchor="w")
+
+        for index, device in enumerate(devices, start=1):
+            serial = device.serial
+            model = device.prop.get("ro.product.model", "Desconhecido")
+            combo_values.append(f"{index}. {serial} | {model}")
+
+            if serial not in self.device_vars:
+                self.device_vars[serial] = tk.BooleanVar(value=True)
+
+            if hasattr(self, "device_list_frame"):
+                item = tk.Frame(self.device_list_frame, bg=C["surface_alt"], padx=12, pady=10, highlightthickness=1, highlightbackground=C["border"])
+                item.pack(fill="x", pady=4)
+                tk.Checkbutton(item, text=model, variable=self.device_vars[serial], bg=C["surface_alt"], fg=C["text"], activebackground=C["surface_alt"], activeforeground=C["text"], selectcolor=C["surface_alt"], cursor="hand2", bd=0, font=FONT_SUBTITLE).pack(anchor="w")
+                tk.Label(item, text=serial, font=FONT_TINY, bg=C["surface_alt"], fg=C["muted"]).pack(anchor="w", pady=(2, 0))
+                tk.Label(item, text="Online", font=FONT_TINY, bg=C["surface_alt"], fg=C["success"]).pack(anchor="e")
+
+        if hasattr(self, "combo_dev"):
+            self.combo_dev["values"] = combo_values
+            if combo_values:
+                self.combo_dev.current(0)
 
     def _connect_adb(self):
-        addr = self.adb_ip.get()
-        if not addr: return
-        try:
-            self.log(f"Conectando a {addr}...", "action")
-            r = adbutils.adb.connect(addr)
-            self.log(f"Resultado: {r}", "info")
-            self._refresh_devs()
-        except Exception as e: self.log(str(e), "error")
-
-    def _start_calib(self):
-        dev = self.selected_device.get()
-        if not dev: 
-            messagebox.showwarning("Erro", "Selecione um dispositivo!")
+        address = self.adb_ip.get().strip()
+        if not address:
             return
         try:
-            if ". " in dev and " | " in dev:
-                serial = dev.split(". ")[1].split(" | ")[0]
+            self.log(f"Conectando a {address}...", "action")
+            result = adbutils.adb.connect(address)
+            self.log(f"Resultado do ADB: {result}", "info")
+            self._refresh_devs()
+        except Exception as exc:
+            self.log(str(exc), "error")
+
+    def _start_calib(self):
+        device_desc = self.selected_device.get().strip()
+        if not device_desc:
+            messagebox.showwarning("Erro", "Selecione um dispositivo nas configuracoes.")
+            return
+
+        try:
+            if ". " in device_desc:
+                serial = device_desc.split(". ", 1)[1].split(" | ", 1)[0]
             else:
-                serial = dev.split(" | ")[0]
-        except: serial = dev
-        def _calib():
-            self.log("Iniciando calibração...", "action")
+                serial = device_desc.split(" | ", 1)[0]
+        except Exception:
+            serial = device_desc
+
+        def _calibrate():
+            self.log(f"[{serial}] Iniciando calibracao...", "action")
             try:
                 import uiautomator2 as u2
-                d = u2.connect(serial)
-                if calibrate_device(d, serial):
-                    self.log("Calibrado com sucesso!", "success")
+
+                if calibrate_device(u2.connect(serial), serial):
+                    self.log(f"[{serial}] Calibracao concluida com sucesso.", "success")
                 else:
-                    self.log("Falha na calibração.", "error")
-            except Exception as e: self.log(str(e), "error")
-        threading.Thread(target=_calib, daemon=True).start()
+                    self.log(f"[{serial}] Calibracao nao concluida.", "warning")
+            except Exception as exc:
+                self.log(f"[{serial}] Erro na calibracao: {exc}", "error")
+
+        threading.Thread(target=_calibrate, daemon=True).start()
+
+    def _update_predictions(self, profit, elapsed_str):
+        try:
+            hours, minutes, seconds = map(int, elapsed_str.split(":"))
+            total_seconds = (hours * 3600) + (minutes * 60) + seconds
+            if total_seconds < 60:
+                return
+
+            rate = profit / total_seconds
+            periods = {
+                "1 Hora": 3600,
+                "12 Horas": 43200,
+                "1 Dia": 86400,
+                "1 Semana": 604800,
+                "1 Mes": 2592000,
+            }
+            for label, duration in periods.items():
+                projected = int(rate * duration)
+                self.pred_labels[label].config(text=f"+{projected:,}".replace(",", "."))
+        except Exception:
+            return
+
+    def _update_reports_text(self):
+        stats = manager.get_all_stats()
+        total = sum(stats.values())
+
+        self.reports_text.config(state="normal")
+        self.reports_text.delete("1.0", tk.END)
+        self.reports_text.insert("end", f"Relatorio do dia {manager.data['last_reset']}\n")
+        self.reports_text.insert("end", "=" * 42 + "\n\n")
+        if not stats:
+            self.reports_text.insert("end", "Nenhum dado registrado hoje.\n")
+        else:
+            for email, profit in stats.items():
+                self.reports_text.insert("end", f"Conta : {email}\n")
+                self.reports_text.insert("end", f"Pontos: +{profit:,}\n\n".replace(",", "."))
+
+        self.reports_text.insert("end", "-" * 42 + "\n")
+        self.reports_text.insert("end", f"TOTAL: +{total:,}\n".replace(",", "."))
+        self.reports_text.config(state="disabled")
+        self.reports_dirty = False
+
 
 if __name__ == "__main__":
     try:
         from ctypes import windll
+
         windll.shcore.SetProcessDpiAwareness(1)
-    except: pass
+    except Exception:
+        pass
+
     root = tk.Tk()
     app = SpinGUI(root)
     root.mainloop()

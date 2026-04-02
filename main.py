@@ -3,18 +3,15 @@
 ║          SPINBOT OPTIMIZED v0.4.0 - MAX PERFORMANCE          ║
 ╚══════════════════════════════════════════════════════════════╝
 """
-import sys
 import time
-import os
 import threading
 import gc
 from datetime import datetime
-from colorama import init, Fore, Style
+from colorama import init, Fore
 
 import config
 import uiautomator2 as u2
 from adb_utils import (
-    connect_device,
     launch_app,
     force_restart_app,
     is_app_running,

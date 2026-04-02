@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import os
-from PIL import Image
 import uiautomator2 as u2
 import logging
 
@@ -91,7 +90,6 @@ def click_visual_element(device: u2.Device, template_name: str, threshold: float
     pos = find_template_on_screen(device, template_name, threshold, roi)
     if pos:
         # Cross-Click (Nuclear Option)
-        import random
         pts = [(0,0), (-2,0), (2,0), (0,-2), (0,2)] # Cross pattern offsets
         for dx, dy in pts:
              tx, ty = pos[0] + dx, pos[1] + dy

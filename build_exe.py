@@ -30,6 +30,12 @@ args = [
     '--collect-all=adbutils',
     '--collect-all=PIL',
     '--collect-all=cv2',
+    '--exclude-module=torch',
+    '--exclude-module=torchvision',
+    '--exclude-module=tensorflow',
+    '--exclude-module=tensorboard',
+    '--exclude-module=scipy',
+    '--exclude-module=skimage',
     
     # Adicionar dados (Templates de imagem e binários ADB)
     '--add-data=assets/templates;assets/templates',

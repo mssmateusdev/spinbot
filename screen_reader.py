@@ -13,7 +13,6 @@ import re
 import time
 import unicodedata
 import uiautomator2 as u2
-from colorama import Fore, Style
 import config
 import visual_detector
 import logging

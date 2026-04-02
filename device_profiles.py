@@ -9,7 +9,6 @@ proporções da tela + OCR para detectar as regiões automaticamente.
 
 import os
 import json
-import re
 import time
 import uiautomator2 as u2
 from colorama import Fore, Style

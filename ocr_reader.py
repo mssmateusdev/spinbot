@@ -8,9 +8,7 @@ Requer Tesseract-OCR instalado no sistema.
 
 import re
 import os
-import sys
-import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance
 
 # Tentar importar pytesseract
 try:
