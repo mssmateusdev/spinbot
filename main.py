@@ -25,7 +25,8 @@ from screen_reader import (
     find_ad_button,
     find_close_button,
     check_spins_status,
-    check_and_dismiss_popup,
+    check_and_dismiss_warning_popup,
+    check_and_dismiss_generic_close,
     is_main_screen,
     is_ad_screen,
     get_ad_timer,
@@ -226,9 +227,14 @@ class SpinAutomator:
                 self.stats_update(True)
                 
             except Exception as e:
-                self.log(f"Erro Crítico no loop: {e}", "error")
                 import traceback
-                print(traceback.format_exc())
+                error_detail = traceback.format_exc()
+                self.log(f"Erro Crítico no loop: {e}", "error")
+                print(f"DEBUG TRACEBACK:\n{error_detail}")
+                
+                # Opcional: registrar em arquivo para o usuário ler
+                with open("critical_error.log", "a") as f:
+                    f.write(f"\n--- {datetime.now()} ---\n{error_detail}\n")
                 # Forçar a reconexão na próxima tentativa
                 self.device = None
                 self.log("Aguardando 10s antes de tentar reconectar...", "warning")
@@ -245,17 +251,17 @@ class SpinAutomator:
         if btn_start:
             self.log("Tela inicial detectada. Clicando em Iniciar...", "action")
             btn_start.click()
-            self.wait(2)
+            self.wait(1) # Reduzido de 2s para 1s
             
         # 2. Tela de Login
         field = find_email_field(self.device)
         if field:
             self.log(f"Inserindo email...", "action")
             field.click()
-            self.wait(1)
+            self.wait(0.5) # Reduzido de 1s para 0.5s
             self.device.send_keys(self.account_email)
             self.device.press("enter")
-            self.wait(1)
+            self.wait(0.5) # Reduzido de 1s para 0.5s
             
             btn_login = find_login_button(self.device)
             if btn_login:
@@ -267,6 +273,8 @@ class SpinAutomator:
                 while (time.time() - wait_start) < 30:
                      if is_main_screen(self.device):
                          self.log("Login efetuado com sucesso!", "success")
+                         self.log("Aguardando 5s para sincronizar spins e saldo...", "info")
+                         self.wait(5) # Delay extra para garantir que o saldo e spins carreguem
                          return True
                      if self.wait(1): return False
                 
@@ -291,8 +299,17 @@ class SpinAutomator:
         """
         self.log(f"Redirecionamento externo detectado ({pkg_detected})! Analisando...", "warning")
         
-        # 1. Caso especial: Google Identity/Play Store Login
+        # 1. Caso especial: Google Identity/Play Store Login/Dialogs
         if pkg_detected in ["com.google.android.gms", "com.android.vending"]:
+             # Prioridade: Tentar encontrar um botão de fechar (X) antes de usar o botão 'Back' do sistema
+             close_btn = find_close_button(self.device)
+             if close_btn:
+                  self.log(f"Botão de fechar (X) detectado em {pkg_detected}. Clicando...", "action")
+                  close_btn.click()
+                  self.wait(1.5)
+                  if self.device.app_current().get("package") == config.APP_PACKAGE:
+                       return True
+
              for text in config.PLAY_STORE_LOGIN_TEXTS:
                   if self.device(textContains=text).exists(timeout=0.1):
                        self.log(f"Popup de Identidade Google detectado! Tentando dispensar...", "action")
@@ -347,10 +364,28 @@ class SpinAutomator:
                  return False # Forçar reinício do fluxo
             
             if is_main_screen(self.device):
-                if check_and_dismiss_popup(self.device):
-                    self.log("Sincronizando spins: Popup fechado. Reiniciando app...", "warning")
-                    force_restart_app(self.device)
-                    self.wait(5)
+                # 1. Fechar botões 'CLOSE' genéricos mas CONTINUAR o código (sem reiniciar o loop)
+                if check_and_dismiss_generic_close(self.device):
+                    self.log("Botão de fechar genérico detectado e clicado.", "info")
+                    self.wait(1.0) # Espera a tela estabilizar
+
+                # 2. Verificação do Popup crítico 'Use all spins' - Este requer ação especial
+                if check_and_dismiss_warning_popup(self.device):
+                    self.log("Aviso 'Use all spins' detectado. Tentando GIRAR primeiro...", "warning")
+                    spin_btn = find_spin_button(self.device)
+                    if spin_btn:
+                         spin_btn.click()
+                         self.wait(1.5)
+                         
+                         # Se o aviso persistir, reiniciamos para assistir anúncio
+                         if check_and_dismiss_warning_popup(self.device):
+                             self.log("Aviso persistente! Reiniciando para assistir anúncio...", "error")
+                             force_restart_app(self.device)
+                             self.wait(5)
+                             ad_btn = find_ad_button(self.device)
+                             if ad_btn:
+                                 ad_btn.click()
+                                 self.watch_ad()
                     continue
                 
                 status = check_spins_status(self.device, self.device_profile)
@@ -400,8 +435,8 @@ class SpinAutomator:
                              coins_at_turbo_start = self.current_coins
                              self.stats_update()
                              
-                        # Verificação de fim de spins (a cada 3 cliques para não pesar o ADB)
-                        if turbo_clicks % 3 == 0:
+                        # Verificação de fim de spins (a cada 5 cliques para não pesar o ADB - Otimizado)
+                        if turbo_clicks % 5 == 0:
                              if check_spins_status(self.device) == "NO_SPINS":
                                   self.log(f"Modo Turbo finalizado após {turbo_clicks} giros.", "info")
                                   break
@@ -415,6 +450,17 @@ class SpinAutomator:
                     continue
                     
                 elif status == "NO_SPINS":
+                    # --- DUPLA VERIFICAÇÃO CONFORME SOLICITADO ---
+                    # Evita o erro de clicar no anúncio enquanto os spins ainda estão carregando
+                    self.log("Verificando se os spins realmente acabaram antes de assistir anúncio...", "info")
+                    self.wait(1.5) # Reduzido de 2.5s para 1.5s para mais rapidez
+                    
+                    spins_confirm = check_spins_status(self.device, self.device_profile)
+                    if spins_confirm == "HAS_SPINS":
+                         self.log("Falso positivo: Spins estão disponíveis! Cancelando ida para o anúncio.", "success")
+                         continue
+                    # ---------------------------------------------
+                    
                     ad_btn = find_ad_button(self.device)
                     if ad_btn:
                         if not self.dry_run: ad_btn.click()
@@ -480,18 +526,36 @@ class SpinAutomator:
                  self.wait(2)
                  continue
 
-            # 1.5. Verificar Recompensa Concedida (REIR PRIORIDADE)
-            # Ao detectar recompensa, o bot deve reiniciar imediatamente para não travar na tela final
+            # 1.5. Verificar Recompensa Concedida / Reward Granted (ALTA PRIORIDADE)
+            # Ao detectar recompensa, tentamos apertar no X. Se falhar, reiniciamos sem limpar dados.
             if self.device(textContains="Recompensa concedida").exists(timeout=0.2) or \
-               self.device(textContains="Recompensa concluida").exists(timeout=0.2):
-                self.log("Recompensa concedida detectada! Reiniciando app imediatamente...", "success")
-                force_restart_app(self.device, clear_cache=False)
-                self.wait(5)
-                return True
+               self.device(textContains="Recompensa concluida").exists(timeout=0.2) or \
+               self.device(textContains="Reward granted").exists(timeout=0.2):
+                
+                self.log("Recompensa concedida / Reward granted detectada! Tentando fechar no X...", "success")
+                close_btn = find_close_button(self.device, max_retries=2, timeout_per_retry=1.0)
+                
+                if close_btn:
+                    self.log("Botão X encontrado após recompensa, clicando...", "action")
+                    close_btn.click()
+                    self.wait(3.5)
+                    
+                    if is_main_screen(self.device):
+                        return True
+                        
+                    self.log("X pressionado mas ainda não voltou para a main. Reiniciando app (sem limpar dados)...", "warning")
+                    force_restart_app(self.device, clear_cache=False)
+                    self.wait(5)
+                    return True
+                else:
+                    self.log("Botão X não encontrado após recompensa. Reiniciando app (sem limpar dados)...", "warning")
+                    force_restart_app(self.device, clear_cache=False)
+                    self.wait(5)
+                    return True
 
             # 2. Voltou para tela principal? (Sucesso!)
             if is_main_screen(self.device):
-                check_and_dismiss_popup(self.device)
+                check_and_dismiss_warning_popup(self.device)
                 
                 # Verificação extra solicitada pelo usuário (Se spins for 0, não girar)
                 spins = self.get_spins_count(quick=True)
@@ -552,7 +616,7 @@ class SpinAutomator:
             required_wait = 1 if timer_was_active else min_wait_fallback
             
             if elapsed > required_wait:
-                close_btn = find_close_button(self.device)
+                close_btn = find_close_button(self.device, max_retries=3, timeout_per_retry=2.5)
                 
                 # Proteção extra: Se achou um botão escrito "Skip" ou "Pular", 
                 # só clica se já passou pelo menos 25 segundos, pois costumam não dar prêmio antes.

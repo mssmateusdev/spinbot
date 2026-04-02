@@ -4,7 +4,7 @@ import sys
 
 # Script auxiliar para finalizar a build
 try:
-    dist_path = "dist/SpinBot_v0.4.1"
+    dist_path = "dist/SpinBot_v0.6.1"
     if not os.path.exists(dist_path):
         os.makedirs(dist_path, exist_ok=True)
     

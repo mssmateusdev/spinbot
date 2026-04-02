@@ -3,36 +3,36 @@ import os
 import shutil
 
 # Limpar dist anterior
-if os.path.exists('dist/SpinBot_v0.4.1'):
+if os.path.exists('dist/SpinBot_v0.6.1'):
     try:
-        shutil.rmtree('dist/SpinBot_v0.4.1')
+        shutil.rmtree('dist/SpinBot_v0.6.1')
     except:
         pass
 
-print("--- Iniciando Build do SpinBot (No Console) ---")
+print("--- Iniciando Build do SpinBot v0.6.1 (No Console) ---")
 
 args = [
     'gui.py',                      # Script principal
-    '--name=SpinBot_v0.4.1',       # Nome do executável (v0.4.1)
-    '--onedir',                    # Pasta única (mais rápido que onefile)
-    '--noconfirm',                 # Substituir destino sem perguntar
-    '--clean',                     # Limpar cache
-    '--noconsole',                 # Ocultar janela do CMD (apenas GUI)
+    '--name=SpinBot_v0.6.1',       # Nome do executável (v0.6.1)
+    '--onedir',                    
+    '--noconfirm',                 
+    '--clean',                     
+    '--noconsole',                 
     
-    # Imports ocultos
+    # Imports ocultos e Coletas
     '--hidden-import=uiautomator2',
     '--hidden-import=adbutils',
     '--hidden-import=PIL',
     '--hidden-import=numpy',
-    '--hidden-import=pytesseract',
+    '--hidden-import=cv2',
     
-    # Coletar dados
     '--collect-all=uiautomator2',
     '--collect-all=adbutils',
     '--collect-all=PIL',
-    # 'pytesseract' is a module, not a package, so collect-all skip it anyway
+    '--collect-all=cv2',
     
-    # Adicionar ícone e binários do ADB aos dados internos
+    # Adicionar dados (Templates de imagem e binários ADB)
+    '--add-data=assets/templates;assets/templates',
     '--add-data=icon.png;.',
     '--add-data=adb.exe;.',
     '--add-data=AdbWinApi.dll;.',
