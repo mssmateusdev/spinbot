@@ -1,13 +1,19 @@
 import json
 import os
+import threading
 import time
 from datetime import datetime
+
+import config
 
 STATS_FILE = "stats.json"
 REPORTS_DIR = "reports"
 
 class StatsManager:
     def __init__(self):
+        self._lock = threading.RLock()
+        self._last_save = 0.0
+        self._dirty = False
         if not os.path.exists(REPORTS_DIR):
             os.makedirs(REPORTS_DIR)
         self.data = self._load()
@@ -22,8 +28,20 @@ class StatsManager:
         return {"last_reset": datetime.now().strftime("%Y-%m-%d"), "accounts": {}}
 
     def _save(self):
-        with open(STATS_FILE, "w", encoding="utf-8") as f:
+        tmp_path = f"{STATS_FILE}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=4, ensure_ascii=False)
+        # Escrita atômica evita JSON corrompido se outra thread ler durante o flush.
+        os.replace(tmp_path, STATS_FILE)
+        self._last_save = time.time()
+        self._dirty = False
+
+    def _save_if_due(self, force=False):
+        interval = getattr(config, "STATS_SAVE_INTERVAL", 5.0)
+        if force or (time.time() - self._last_save) >= interval:
+            self._save()
+        else:
+            self._dirty = True
             
     def _check_reset(self):
         today = datetime.now().strftime("%Y-%m-%d")
@@ -52,38 +70,37 @@ class StatsManager:
     def update_profit(self, email, points):
         """Atualiza o lucro de uma conta específica, suportando múltiplas instâncias."""
         if not email: return
-        
-        # Tenta carregar os dados mais recentes do disco para não sobrescrever ganhos de outras instâncias
-        for _ in range(5): # 5 tentativas de lock "suave"
+
+        with self._lock:
             try:
                 current_data = self._load()
-                # Mantém o reset diário consistente entre as instâncias
                 today = datetime.now().strftime("%Y-%m-%d")
                 if current_data.get("last_reset") != today:
-                    # Se mudou o dia em outra instância, respeitamos o reset dela
                     self.data = current_data
                     self._check_reset()
                 else:
                     self.data["accounts"] = current_data.get("accounts", {})
-                
-                # Atualiza os pontos desta instância
+
                 self.data["accounts"][email] = points
                 self.data["last_reset"] = today
-                
-                # Salva os dados mesclados
-                self._save()
-                break
+                self._save_if_due()
             except Exception:
-                time.sleep(0.5)
+                # Última linha de defesa: mantém o estado em memória mesmo se o disco falhar.
+                self.data.setdefault("accounts", {})[email] = points
+                self._dirty = True
 
     def get_profit(self, email):
         """Retorna o lucro já acumulado hoje para este email."""
-        self._check_reset()
-        return self.data.get("accounts", {}).get(email, 0)
+        with self._lock:
+            self._check_reset()
+            return self.data.get("accounts", {}).get(email, 0)
 
     def get_all_stats(self):
-        self._check_reset()
-        return self.data["accounts"]
+        with self._lock:
+            self._check_reset()
+            if self._dirty:
+                self._save_if_due(force=True)
+            return self.data["accounts"]
 
 # Singleton
 manager = StatsManager()

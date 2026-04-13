@@ -812,10 +812,10 @@ class SpinGUI(QMainWindow):
 
         if self.ultra_eco_checkbox.isChecked():
             from adb_utils import apply_headless_optimizations
-            import uiautomator2 as u2
+            from adb_utils import connect_managed_device
 
             try:
-                apply_headless_optimizations(u2.connect(serial))
+                apply_headless_optimizations(connect_managed_device(serial))
             except Exception as exc:
                 self.bus.instance_log.emit(serial, f"Falha ao aplicar ultra-eco: {exc}", "warning")
 
@@ -826,10 +826,10 @@ class SpinGUI(QMainWindow):
         finally:
             if self.ultra_eco_checkbox.isChecked():
                 from adb_utils import restore_display_defaults
-                import uiautomator2 as u2
+                from adb_utils import connect_managed_device
 
                 try:
-                    restore_display_defaults(u2.connect(serial))
+                    restore_display_defaults(connect_managed_device(serial))
                 except Exception as exc:
                     self.bus.instance_log.emit(serial, f"Falha ao restaurar display: {exc}", "warning")
             self.bus.instance_finished.emit(serial)
@@ -931,8 +931,9 @@ class SpinGUI(QMainWindow):
             self.bus.global_log.emit(f"[{serial}] Iniciando calibracao...", "action")
             try:
                 import uiautomator2 as u2
+                from adb_utils import connect_managed_device
 
-                if calibrate_device(u2.connect(serial), serial):
+                if calibrate_device(connect_managed_device(serial), serial):
                     self.bus.global_log.emit(f"[{serial}] Calibracao concluida com sucesso.", "success")
                 else:
                     self.bus.global_log.emit(f"[{serial}] Calibracao nao concluida.", "warning")

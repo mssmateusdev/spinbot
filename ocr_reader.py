@@ -8,7 +8,11 @@ Requer Tesseract-OCR instalado no sistema.
 
 import re
 import os
+import threading
+import time
 from PIL import Image, ImageEnhance
+
+import config
 
 # Tentar importar pytesseract
 try:
@@ -33,10 +37,43 @@ for p in possible_paths:
 if pytesseract and TESSERACT_CMD:
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
+_ocr_cache = {}
+_ocr_lock = threading.RLock()
+_warned_missing_tesseract = False
+
 
 def _screenshot_to_pil(device) -> Image.Image:
     """Captura screenshot do dispositivo e retorna como PIL Image."""
-    return device.screenshot()
+    try:
+        return device.screenshot(ttl=getattr(config, "SCREENSHOT_CACHE_TTL", 0.35))
+    except TypeError:
+        return device.screenshot()
+
+
+def _device_key(device):
+    return getattr(device, "serial", None) or getattr(device, "_serial", None) or id(device)
+
+
+def _region_key(kind: str, device, region: dict):
+    return (
+        kind,
+        _device_key(device),
+        region.get("x1"), region.get("y1"), region.get("x2"), region.get("y2"),
+    )
+
+
+def _get_cached_ocr(key, ttl: float):
+    now = time.time()
+    with _ocr_lock:
+        ts, value = _ocr_cache.get(key, (0, None))
+        if value is not None and (now - ts) <= ttl:
+            return value
+    return None
+
+
+def _set_cached_ocr(key, value: int):
+    with _ocr_lock:
+        _ocr_cache[key] = (time.time(), value)
 
 
 def _crop_region(img: Image.Image, region: dict, margin: int = 10) -> Image.Image:
@@ -80,17 +117,26 @@ def _extract_number(text: str) -> int:
 
 
 def read_coins_ocr(device, profile: dict) -> int:
+    global _warned_missing_tesseract
     if not pytesseract:
-        print("  [OCR] pytesseract não instalado.")
+        if not _warned_missing_tesseract:
+            print("  [OCR] pytesseract não instalado.")
+            _warned_missing_tesseract = True
         return -1
     if not TESSERACT_CMD:
-        print("  [OCR] Tesseract executável não encontrado. Instale o Tesseract-OCR.")
+        if not _warned_missing_tesseract:
+            print("  [OCR] Tesseract executável não encontrado. Instale o Tesseract-OCR.")
+            _warned_missing_tesseract = True
         return -1
 
     if not profile or not profile.get("coin_counter"):
         return -1
     
     region = profile["coin_counter"]["bounds_region"]
+    cache_key = _region_key("coins", device, region)
+    cached = _get_cached_ocr(cache_key, getattr(config, "OCR_MIN_INTERVAL_COINS", 2.0))
+    if cached is not None:
+        return cached
     
     try:
         img = _screenshot_to_pil(device)
@@ -104,7 +150,9 @@ def read_coins_ocr(device, profile: dict) -> int:
         value = _extract_number(text)
         
         if value >= 0:
-            print(f"  [OCR] Moedas lidas: {value}")
+            if getattr(config, "DEBUG_MODE", False):
+                print(f"  [OCR] Moedas lidas: {value}")
+            _set_cached_ocr(cache_key, value)
             return value
         
         return -1
@@ -120,6 +168,10 @@ def read_spins_ocr(device, profile: dict) -> int:
     if not profile or not profile.get("spin_counter"): return -1
     
     region = profile["spin_counter"]["bounds_region"]
+    cache_key = _region_key("spins", device, region)
+    cached = _get_cached_ocr(cache_key, getattr(config, "OCR_MIN_INTERVAL_SPINS", 0.8))
+    if cached is not None:
+        return cached
     try:
         img = _screenshot_to_pil(device)
         cropped = _crop_region(img, region, margin=5)
@@ -130,7 +182,9 @@ def read_spins_ocr(device, profile: dict) -> int:
         value = _extract_number(text)
         
         if value >= 0:
-            print(f"  [OCR] Spins lidos: {value}")
+            if getattr(config, "DEBUG_MODE", False):
+                print(f"  [OCR] Spins lidos: {value}")
+            _set_cached_ocr(cache_key, value)
             return value
         return -1
     except:

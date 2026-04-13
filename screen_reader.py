@@ -16,13 +16,20 @@ import uiautomator2 as u2
 import config
 import visual_detector
 import logging
+import threading
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG if getattr(config, "DEBUG_MODE", False) else logging.WARNING)
 logger = logging.getLogger("ScreenReader")
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_MODE", False) else logging.WARNING)
 
-# Cache local da hierarquia para evitar múltiplos dumps no mesmo ciclo
-_last_hierarchy = None
-_last_dump_time = 0
+# Cache local por device. O cache global anterior misturava XML entre instâncias em
+# threads paralelas, causando detecção e cliques de um emulador no estado de outro.
+_hierarchy_cache = {}
+_hierarchy_lock = threading.RLock()
+
+
+def _device_key(d: u2.Device):
+    return getattr(d, "serial", None) or getattr(d, "_serial", None) or id(d)
 
 
 def normalize_text(text: str) -> str:
@@ -87,7 +94,8 @@ class VirtualUiObject:
             if y2 > h * 0.9:
                 scroll_down = int((y2 - h * 0.7))
                 self.d.shell(f"input swipe {w//2} {h//2} {w//2} {h//2 - scroll_down} 300")
-                time.sleep(0.5)
+                _invalidate_cached_hierarchy(self.d)
+                time.sleep(0.25)
                 logger.debug(f"[CLICK] Scroll realizado para expor elemento")
         except Exception as e:
             logger.debug(f"[CLICK] Erro ao verificar visibilidade: {e}")
@@ -95,7 +103,7 @@ class VirtualUiObject:
     def _check_overlay(self):
         """Verifica se há overlay bloqueando o clique (diálogos, ads, etc)."""
         try:
-            xml = self.d.dump_hierarchy()
+            xml = _get_cached_hierarchy(self.d, ttl=0.2)
             
             # Verifica diálogos comuns que podem bloquear
             blockers = ["android.widget.PopupWindow", "android.app.Dialog", "android.widget.FrameLayout"]
@@ -135,6 +143,7 @@ class VirtualUiObject:
                 if not force and self._check_overlay():
                     logger.warning(f"[CLICK] Overlay detectado, tentando pressionar BACK primeiro")
                     self.d.press("back")
+                    _invalidate_cached_hierarchy(self.d)
                     time.sleep(0.5)
                     continue
                 
@@ -142,8 +151,9 @@ class VirtualUiObject:
                 tx = self.center_x + random.randint(-2, 2)
                 ty = self.center_y + random.randint(-2, 2)
                 
-                # Método primário: ADB shell tap (mais eficaz contra ads sobrepostos)
-                self.d.shell(f"input tap {tx} {ty}")
+                # Clique do driver reaproveita a sessão u2; o shell fica como fallback.
+                if not _tap(self.d, tx, ty):
+                    raise RuntimeError("tap falhou")
                 logger.info(f"[CLICK] ✓ Clique executado em ({tx}, {ty}) [tentativa {attempt + 1}]")
                 return True
                 
@@ -153,6 +163,7 @@ class VirtualUiObject:
                 # Fallback 1: Driver do uiautomator2
                 try:
                     self.d.click(self.center_x, self.center_y)
+                    _invalidate_cached_hierarchy(self.d)
                     logger.info(f"[CLICK] ✓ Fallback driver executado")
                     return True
                 except:
@@ -161,6 +172,7 @@ class VirtualUiObject:
                 # Fallback 2: Clique por coordenadas via driver
                 try:
                     self.d.shell(f"input tap {self.center_x} {self.center_y}")
+                    _invalidate_cached_hierarchy(self.d)
                     return True
                 except:
                     pass
@@ -177,13 +189,51 @@ class VirtualUiObject:
 
 def _get_cached_hierarchy(d: u2.Device, ttl=0.5):
     """Obtém a hierarquia de UI, usando cache se estiver dentro do TTL."""
-    global _last_hierarchy, _last_dump_time
-    import time
+    # ManagedAdbDevice invalida cache automaticamente após ações; prefira esse caminho.
+    try:
+        return d.dump_hierarchy(ttl=ttl)
+    except TypeError:
+        pass
+
     now = time.time()
-    if _last_hierarchy is None or (now - _last_dump_time) > ttl:
-        _last_hierarchy = d.dump_hierarchy()
-        _last_dump_time = now
-    return _last_hierarchy
+    key = _device_key(d)
+    with _hierarchy_lock:
+        ts, xml = _hierarchy_cache.get(key, (0, None))
+        if xml is not None and ttl > 0 and (now - ts) <= ttl:
+            return xml
+    xml = d.dump_hierarchy()
+    with _hierarchy_lock:
+        _hierarchy_cache[key] = (time.time(), xml)
+    return xml
+
+
+def _invalidate_cached_hierarchy(d: u2.Device):
+    try:
+        d.invalidate_ui_cache()
+    except Exception:
+        pass
+    with _hierarchy_lock:
+        _hierarchy_cache.pop(_device_key(d), None)
+
+
+def _tap(d: u2.Device, x: int, y: int, prefer_shell: bool = False) -> bool:
+    """Clique centralizado: reduz shell taps e invalida caches de UI após ação."""
+    try:
+        if prefer_shell:
+            d.shell(f"input tap {x} {y}")
+        else:
+            d.click(x, y)
+        _invalidate_cached_hierarchy(d)
+        return True
+    except Exception:
+        if not prefer_shell:
+            try:
+                d.shell(f"input tap {x} {y}")
+                _invalidate_cached_hierarchy(d)
+                return True
+            except Exception:
+                pass
+    return False
 
 def find_spin_button(d: u2.Device, profile: dict = None):
     # Seletores u2 já são relativamente rápidos e processados no device
@@ -218,9 +268,10 @@ def check_and_dismiss_warning_popup(d: u2.Device) -> bool:
             match = re.search(fr'(?:text|content-desc)="[^"]*{text}[^"]*"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml, re.I)
             if match:
                 x1, y1, x2, y2 = map(int, match.groups())
-                d.click((x1 + x2) // 2, (y1 + y2) // 2)
+                _tap(d, (x1 + x2) // 2, (y1 + y2) // 2)
                 return True
         d.press("back")
+        _invalidate_cached_hierarchy(d)
         return True
     return False
 
@@ -233,7 +284,7 @@ def check_and_dismiss_generic_close(d: u2.Device) -> bool:
     match = re.search(close_pattern, xml)
     if match:
         x1, y1, x2, y2 = map(int, match.groups()[1:])
-        d.click((x1 + x2) // 2, (y1 + y2) // 2)
+        _tap(d, (x1 + x2) // 2, (y1 + y2) // 2)
         return True
     
     # Fallback Visual (Abrangente para ambos os cantos superiores)
@@ -277,7 +328,7 @@ def read_spin_count_from_ui(d: u2.Device, profile: dict = None) -> int:
         return read_spins_with_profile(d, profile)
     
     try:
-        xml = d.dump_hierarchy()
+        xml = _get_cached_hierarchy(d, ttl=0.35)
         # Regex flexível: extrai texto (podendo conter vírgula/ponto) e bounds
         matches = re.findall(r'text="([\d.,]+)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml)
         
@@ -313,7 +364,7 @@ def read_coin_count_from_ui(d: u2.Device, profile: dict = None) -> int:
     
     # 1. Tentar busca rápida na hierarquia
     try:
-        xml = d.dump_hierarchy()
+        xml = _get_cached_hierarchy(d, ttl=0.35)
         # Busca por números que podem conter separadores (ex: 78,051)
         matches = re.findall(r'(?:text|content-desc)="([\d.,]+)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml)
         
@@ -336,9 +387,6 @@ def read_coin_count_from_ui(d: u2.Device, profile: dict = None) -> int:
             # O maior valor nessa área costuma ser o saldo (moedas)
             return max(candidates)
             
-    except Exception: pass
-            
-    # 2. Fallback para OCR
     except Exception: pass
 
     return -1
@@ -523,7 +571,7 @@ def _find_x_by_content_desc(d: u2.Device, xml: str, w: int, h: int):
         candidates = []
         for match in re.finditer(desc_regex, xml, re.IGNORECASE):
             content_desc = match.group(1).lower()
-            x1, y1, x2, y2 = map(int, match.groups()[2:])
+            x1, y1, x2, y2 = map(int, match.groups()[1:])
             
             # Verifica se o content-desc contém alguma palavra de fechar
             if any(p in content_desc for p in close_patterns):
@@ -567,7 +615,7 @@ def _find_x_by_resource_id(d: u2.Device, xml: str, w: int, h: int):
         candidates = []
         for match in re.finditer(rid_regex, xml, re.IGNORECASE):
             rid = match.group(1)
-            x1, y1, x2, y2 = map(int, match.groups()[2:])
+            x1, y1, x2, y2 = map(int, match.groups()[1:])
             
             # Valida que NÃO é botão do sistema
             if not _is_system_button(d, x1, y1, x2, y2, xml):
@@ -609,7 +657,7 @@ def _find_x_by_text_in_clickable(d: u2.Device, xml: str, w: int, h: int):
         # Agora busca textos de fechar que estejam DENTRO desses containers
         for text_match in re.finditer(r'<node[^>]*?text="([^"]*?)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
             text = text_match.group(1).lower()
-            tx1, ty1, tx2, ty2 = map(int, text_match.groups()[2:])
+            tx1, ty1, tx2, ty2 = map(int, text_match.groups()[1:])
             
             match_found = False
             for t in close_texts:
@@ -787,7 +835,7 @@ def click_icon_next_to_continuar(d: u2.Device, max_retries=2):
             tap_y = (cont_y + cont_bottom) // 2
             
             logger.info(f"[CONTINUAR-ICON] Texto termina em X={cont_right}. Clicando NO ÍCONE circular em X={tap_x}, Y={tap_y}")
-            d.shell(f"input tap {tap_x} {tap_y}")
+            _tap(d, tap_x, tap_y)
             return True
             
         except Exception as e:
@@ -977,7 +1025,7 @@ def _layer2_parent_climbing(d: u2.Device, patterns):
             for match in re.finditer(regex, xml, re.IGNORECASE):
                 full_match = match.group(1)
                 full_text = match.group(2)
-                x1, y1, x2, y2 = map(int, match.groups()[3:])
+                x1, y1, x2, y2 = map(int, match.groups()[2:])
                 
                 norm_text = normalize_for_match(full_text)
                 if norm_pattern not in norm_text and norm_text not in norm_pattern:
@@ -1036,7 +1084,7 @@ def _layer3_text_icon_container(d: u2.Device, patterns):
             
             for text_match in re.finditer(text_regex, xml, re.IGNORECASE):
                 full_text = text_match.group(2)
-                x1, y1, x2, y2 = map(int, text_match.groups()[3:])
+                x1, y1, x2, y2 = map(int, text_match.groups()[2:])
                 
                 norm_text = normalize_for_match(full_text)
                 if norm_pattern not in norm_text and norm_text not in norm_pattern:
@@ -1164,7 +1212,7 @@ def get_ad_timer(d: u2.Device) -> int:
     Otimizado para detectar números próximos ao 'X' e em balões isolados (pill).
     """
     try:
-        xml = d.dump_hierarchy()
+        xml = _get_cached_hierarchy(d, ttl=0.4)
         if not xml: return -1
         
         # 1. Padrões com sufixos em text ou content-desc (seg, s, sec, etc)
@@ -1211,7 +1259,7 @@ def find_login_button(d: u2.Device):
 def get_spin_result(d: u2.Device) -> int:
     """Tenta ler o valor ganho no spin (ex: '+ 50' ou '+100')."""
     try:
-        xml = d.dump_hierarchy()
+        xml = _get_cached_hierarchy(d, ttl=0.25)
         # Busca por padrões de ganho: "+ 100", "+1.000", etc.
         # Aceita text ou content-desc
         matches = re.findall(r'(?:text|content-desc)="\+\s*([\d.,]+)"', xml)
@@ -1240,7 +1288,7 @@ def debug_print_hierarchy(d: u2.Device, max_lines: int = 50):
     Útil para entender a estrutura da UI e desenvolver seletores.
     """
     try:
-        xml = d.dump_hierarchy()
+        xml = _get_cached_hierarchy(d, ttl=0)
         lines = xml.split('\n')[:max_lines]
         print("=" * 60)
         print("HIERARQUIA UI (primeiras linhas):")

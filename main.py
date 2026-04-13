@@ -12,10 +12,14 @@ from colorama import init, Fore
 import config
 import uiautomator2 as u2
 from adb_utils import (
+    connect_managed_device,
+    drop_managed_device,
     launch_app,
     force_restart_app,
     is_app_running,
-    optimize_emulator_memory
+    optimize_emulator_memory,
+    sleep_interruptible,
+    wait_until,
 )
 from screen_reader import (
     find_spin_button,
@@ -101,7 +105,8 @@ class SpinAutomator:
                     "cycles": self.total_cycles,
                     "restarts": self.app_restarts,
                     "current_coins": self.current_coins,
-                    "profit": profit
+                    "profit": profit,
+                    "adb": self.device.get_metrics() if hasattr(self.device, "get_metrics") else None,
                 })
                 
                 # Relatórios persistentes
@@ -126,8 +131,7 @@ class SpinAutomator:
 
     def wait(self, seconds: float) -> bool:
         if self.stop_event and self.stop_event.is_set(): return True
-        time.sleep(seconds)
-        return self.stop_event and self.stop_event.is_set()
+        return sleep_interruptible(seconds, self.stop_event)
 
     def run(self):
         """Entry point para a thread da GUI."""
@@ -139,7 +143,7 @@ class SpinAutomator:
                 if not self.device:
                     self.log(f"Conectando ao dispositivo {self.serial or ''}...", "info")
                     try:
-                        self.device = u2.connect(self.serial) if self.serial else u2.connect()
+                        self.device = connect_managed_device(self.serial)
                         if not self.device: raise Exception("Falha u2.connect")
                     except Exception as e:
                         self.log(f"Falha na conexão ADB: {e}. Tentando em 10s...", "error")
@@ -233,6 +237,7 @@ class SpinAutomator:
                 with open("critical_error.log", "a") as f:
                     f.write(f"\n--- {datetime.now()} ---\n{error_detail}\n")
                 # Forçar a reconexão na próxima tentativa
+                drop_managed_device(self.serial)
                 self.device = None
                 self.log("Aguardando 10s antes de tentar reconectar...", "warning")
                 self.wait(10)
@@ -268,12 +273,12 @@ class SpinAutomator:
                 # MONITORAR SUCESSO DO LOGIN (30s timeout)
                 wait_start = time.time()
                 while (time.time() - wait_start) < 30:
-                     if is_main_screen(self.device):
-                         self.log("Login efetuado com sucesso!", "success")
-                         self.log("Aguardando 5s para sincronizar spins e saldo...", "info")
-                         self.wait(5) # Delay extra para garantir que o saldo e spins carreguem
-                         return True
-                     if self.wait(1): return False
+                    if is_main_screen(self.device):
+                        self.log("Login efetuado com sucesso!", "success")
+                        self.log("Aguardando sincronização de spins e saldo...", "info")
+                        wait_until(lambda: check_spins_status(self.device, self.device_profile) != "UNKNOWN", 5, poll=0.5, stop_event=self.stop_event)
+                        return True
+                    if self.wait(1): return False
                 
                 # TIMEOUT: Limpar dados e reiniciar
                 self.log("TIMEOUT LOGIN: Não entrou na tela principal.", "error")
@@ -420,10 +425,14 @@ class SpinAutomator:
                         # Intervalo mínimo para o toque ser processado
                         self.wait(config.TURBO_CLICK_INTERVAL)
                         
-                        # Verificação de lucro (a cada ciclo do turbo)
-                        from screen_reader import get_spin_result
-                        prize = get_spin_result(self.device)
-                        self._update_coins()
+                        # Leitura de UI/OCR é cara; amostramos em janela curta para reduzir dumps no turbo.
+                        prize = 0
+                        if turbo_clicks % getattr(config, "TURBO_RESULT_CHECK_EVERY", 3) == 0:
+                            from screen_reader import get_spin_result
+                            prize = get_spin_result(self.device)
+
+                        if turbo_clicks % getattr(config, "TURBO_COIN_UPDATE_EVERY", 5) == 0:
+                            self._update_coins()
                         
                         if prize > 0 or self.current_coins > coins_at_turbo_start:
                              # Sucesso! Resetamos o cronômetro de 10s

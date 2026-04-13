@@ -3,13 +3,30 @@ import numpy as np
 import os
 import uiautomator2 as u2
 import logging
+import config
 
 # Configuração de logs para o detector visual
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG if getattr(config, "DEBUG_MODE", False) else logging.WARNING)
 logger = logging.getLogger("VisualDetector")
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_MODE", False) else logging.WARNING)
 
 # Caminho para os templates
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "assets", "templates")
+_template_cache = {}
+
+
+def _load_template(template_name: str):
+    """Carrega templates uma vez; evita I/O de disco em cada polling visual."""
+    if template_name in _template_cache:
+        return _template_cache[template_name]
+    template_path = os.path.join(TEMPLATES_DIR, template_name)
+    if not os.path.exists(template_path):
+        logger.debug(f"Template não encontrado: {template_path}")
+        _template_cache[template_name] = None
+        return None
+    template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    _template_cache[template_name] = template
+    return template
 
 def find_template_on_screen(device: u2.Device, template_name: str, threshold: float = 0.7, roi=None):
     """
@@ -20,19 +37,17 @@ def find_template_on_screen(device: u2.Device, template_name: str, threshold: fl
     :param roi: Region of Interest (x1, y1, x2, y2). Se None, busca na tela toda.
     :return: Coordenadas (x, y) do centro ou None
     """
-    template_path = os.path.join(TEMPLATES_DIR, template_name)
-    if not os.path.exists(template_path):
-        logger.error(f"Template não encontrado: {template_path}")
-        return None
-
     try:
         # 1. Carregar template
-        template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+        template = _load_template(template_name)
         if template is None: return None
         th, tw = template.shape[:2]
 
         # 2. Capturar screenshot
-        screenshot_pil = device.screenshot()
+        try:
+            screenshot_pil = device.screenshot(ttl=getattr(config, "SCREENSHOT_CACHE_TTL", 0.35))
+        except TypeError:
+            screenshot_pil = device.screenshot()
         screenshot_np = np.array(screenshot_pil)
         
         # Converter RGB para BGR (OpenCV) e depois para Grayscale
@@ -89,10 +104,18 @@ def click_visual_element(device: u2.Device, template_name: str, threshold: float
     """Tenta achar e clicar em um elemento visual usando Super Clique."""
     pos = find_template_on_screen(device, template_name, threshold, roi)
     if pos:
-        # Cross-Click (Nuclear Option)
-        pts = [(0,0), (-2,0), (2,0), (0,-2), (0,2)] # Cross pattern offsets
+        pts = [(0, 0)]
+        if getattr(config, "VISUAL_CROSS_TAP", False):
+            pts.extend([(-2, 0), (2, 0), (0, -2), (0, 2)])
         for dx, dy in pts:
-             tx, ty = pos[0] + dx, pos[1] + dy
-             device.shell(f"input tap {tx} {ty}")
+            tx, ty = pos[0] + dx, pos[1] + dy
+            try:
+                device.click(tx, ty)
+            except Exception:
+                device.shell(f"input tap {tx} {ty}")
+        try:
+            device.invalidate_ui_cache()
+        except Exception:
+            pass
         return True
     return False
