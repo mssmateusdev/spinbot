@@ -1,15 +1,17 @@
 import os
 import sys
 import threading
+from html import escape
 from datetime import datetime
 
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QTextCursor
+from PySide6.QtGui import QColor, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -31,49 +33,65 @@ from core.metrics import parse_elapsed, project_profit
 from crypto_utils import CryptoConverter
 from devices.manager import DeviceManager
 from device_profiles import calibrate_device
-from models.automation import InstanceConfig
+from models.automation import InstanceConfig, InstanceStatus
 from services.paths import resource_path
 from stats_manager import manager
 
 
-APP_VERSION = getattr(config, "APP_VERSION", "0.6.4")
+APP_VERSION = getattr(config, "APP_VERSION", "0.6.5")
 
 
 C = {
-    "bg": "#141922",
-    "bg_alt": "#1a202b",
-    "panel": "#10151d",
-    "surface": "#1c2330",
-    "surface_alt": "#242d3c",
-    "surface_soft": "#2f3b50",
-    "console": "#0f141c",
-    "text": "#eff4ff",
-    "muted": "#95a3bc",
-    "accent": "#5f8fff",
-    "accent_2": "#7d63ff",
-    "success": "#2fd18f",
-    "warning": "#ffcb66",
-    "danger": "#ff7a7a",
-    "border": "#313b4f",
+    "bg": "#0d1015",
+    "bg_alt": "#111720",
+    "panel": "#10161f",
+    "panel_alt": "#151d28",
+    "surface": "#161d27",
+    "surface_alt": "#1b2430",
+    "surface_soft": "#263241",
+    "surface_hover": "#2e3b4c",
+    "console": "#0b0f14",
+    "text": "#f3f7fb",
+    "muted": "#99a7b7",
+    "muted_2": "#6f7f91",
+    "accent": "#60c8b7",
+    "accent_hover": "#74d8c8",
+    "points": "#9bb8ff",
+    "profit": "#55d991",
+    "warning": "#f4c95d",
+    "danger": "#ff6f7d",
+    "danger_hover": "#ff8793",
+    "debug": "#a8b3c5",
+    "border": "#2a3544",
+    "border_soft": "#202936",
 }
 
 LEVEL_COLORS = {
     "info": C["muted"],
-    "success": C["success"],
+    "success": C["profit"],
     "warning": C["warning"],
     "error": C["danger"],
     "action": C["accent"],
+    "debug": C["debug"],
     "header": C["text"],
 }
 
 NAV_ITEMS = [
-    ("welcome", "01", "Inicio"),
-    ("home", "02", "Dashboard"),
-    ("predictions", "03", "Projecoes"),
-    ("reports", "04", "Relatorios"),
-    ("settings", "05", "Configuracoes"),
-    ("console", "06", "Console"),
+    ("welcome", "IN", "Inicio"),
+    ("home", "DB", "Dashboard"),
+    ("predictions", "PR", "Projecoes"),
+    ("reports", "RP", "Relatorios"),
+    ("settings", "CF", "Configuracoes"),
+    ("console", "LG", "Console"),
 ]
+
+STATUS_STYLES = {
+    "online": ("Online", C["accent"], "rgba(96, 200, 183, 0.14)"),
+    "working": ("Trabalhando", C["profit"], "rgba(85, 217, 145, 0.16)"),
+    "paused": ("Pausado", C["warning"], "rgba(244, 201, 93, 0.14)"),
+    "error": ("Erro", C["danger"], "rgba(255, 111, 125, 0.15)"),
+    "offline": ("Offline", C["muted_2"], "rgba(111, 127, 145, 0.13)"),
+}
 
 
 class UiBus(QObject):
@@ -83,62 +101,207 @@ class UiBus(QObject):
     instance_finished = Signal(str)
 
 
+def repolish(widget):
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
+def add_shadow(widget, blur=18, offset=6, alpha=70):
+    shadow = QGraphicsDropShadowEffect(widget)
+    shadow.setBlurRadius(blur)
+    shadow.setOffset(0, offset)
+    shadow.setColor(QColor(0, 0, 0, alpha))
+    widget.setGraphicsEffect(shadow)
+
+
 class StatCard(QFrame):
-    def __init__(self, title, value="0", color=C["accent"]):
+    def __init__(self, title, value="0", color=C["accent"], priority="low", hint=""):
         super().__init__()
         self.setObjectName("StatCard")
+        self.setProperty("priority", priority)
+        self._last_value = str(value)
+        add_shadow(self, blur=16, offset=5, alpha=55)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        accent_line = QFrame()
+        accent_line.setObjectName("KpiAccent")
+        accent_line.setFixedHeight(3)
+        accent_line.setStyleSheet(f"background: {color}; border-radius: 1px;")
         title_label = QLabel(title.upper())
         title_label.setObjectName("CardCaption")
         self.value_label = QLabel(value)
         self.value_label.setObjectName("StatValue")
         self.value_label.setStyleSheet(f"color: {color};")
+        self.hint_label = QLabel(hint)
+        self.hint_label.setObjectName("CardHint")
+        self.hint_label.setVisible(bool(hint))
+        layout.addWidget(accent_line)
         layout.addWidget(title_label)
         layout.addWidget(self.value_label)
+        layout.addWidget(self.hint_label)
 
     def set_value(self, value):
+        value = str(value)
+        if value == self._last_value:
+            return
+        self._last_value = value
         self.value_label.setText(value)
+        self.setProperty("pulse", "on")
+        repolish(self)
+        QTimer.singleShot(260, self._clear_pulse)
+
+    def _clear_pulse(self):
+        self.setProperty("pulse", "off")
+        repolish(self)
+
+
+class StatusChip(QWidget):
+    def __init__(self, status="online"):
+        super().__init__()
+        self.setObjectName("StatusChip")
+        self.dot = QLabel()
+        self.dot.setObjectName("StatusDot")
+        self.dot.setFixedSize(8, 8)
+        self.label = QLabel()
+        self.label.setObjectName("StatusText")
+        self._pulse_on = False
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(720)
+        self._pulse_timer.timeout.connect(self._toggle_pulse)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(9, 5, 9, 5)
+        layout.setSpacing(7)
+        layout.addWidget(self.dot)
+        layout.addWidget(self.label)
+        self.set_status(status)
+
+    def set_status(self, status):
+        self.status = status if status in STATUS_STYLES else "offline"
+        text, color, bg = STATUS_STYLES[self.status]
+        self.label.setText(text.upper())
+        self.setStyleSheet(
+            f"QWidget#StatusChip {{ background: {bg}; border: 1px solid {color}; border-radius: 8px; }}"
+            f"QLabel#StatusText {{ color: {color}; font-size: 10px; font-weight: 800; letter-spacing: 0px; }}"
+        )
+        self._set_dot(color)
+        if self.status == "working":
+            self._pulse_timer.start()
+        else:
+            self._pulse_timer.stop()
+            self._pulse_on = False
+
+    def _set_dot(self, color):
+        self.dot.setStyleSheet(f"background: {color}; border-radius: 4px;")
+
+    def _toggle_pulse(self):
+        self._pulse_on = not self._pulse_on
+        self._set_dot(C["accent"] if self._pulse_on else C["profit"])
+
+
+class LogView(QTextEdit):
+    LEVEL_LABELS = {
+        "info": "INFO",
+        "success": "SUCCESS",
+        "warning": "WARNING",
+        "error": "ERROR",
+        "action": "ACTION",
+        "debug": "DEBUG",
+        "header": "EVENT",
+    }
+
+    def __init__(self, compact=False):
+        super().__init__()
+        self.compact = compact
+        self.setReadOnly(True)
+        self.setObjectName("Console")
+        self.setAcceptRichText(True)
+
+    def append_log(self, msg, level="info", source=None):
+        level = (level or "info").lower()
+        color = LEVEL_COLORS.get(level, C["muted"])
+        label = self.LEVEL_LABELS.get(level, level.upper())
+        timestamp = datetime.now().strftime("%H:%M")
+        source_html = ""
+        if source:
+            source_html = f"<span style='color:{C['muted_2']}; font-weight:700;'>{escape(source)}</span> "
+        row_bg = "rgba(255,255,255,0.035)" if level == "header" else "transparent"
+        html = (
+            f"<div style='background:{row_bg}; padding:5px 0; line-height:1.45;'>"
+            f"<span style='color:{C['muted_2']}; font-size:11px;'>[{timestamp}]</span> "
+            f"<span style='color:{color}; font-size:10px; font-weight:800;'>[{label}]</span> "
+            f"{source_html}<span style='color:{C['text']};'>{escape(str(msg))}</span>"
+            f"</div>"
+        )
+        self.append(html)
+        self.moveCursor(QTextCursor.End)
+
+    def trim_blocks(self, max_lines):
+        doc = self.document()
+        while doc.blockCount() > max_lines:
+            cursor = QTextCursor(doc.firstBlock())
+            cursor.select(QTextCursor.BlockUnderCursor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()
+        self.moveCursor(QTextCursor.End)
 
 
 class NavButton(QPushButton):
     def __init__(self, index_text, text):
-        super().__init__(f"{index_text}  {text}")
+        super().__init__(f"{index_text}   {text}")
         self.setCheckable(True)
         self.setObjectName("NavButton")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(40)
+        self.setMinimumHeight(44)
 
 
 class DeviceCard(QFrame):
     def __init__(self, serial, model, checked=True):
         super().__init__()
-        self.checkbox = QCheckBox(model)
+        self.serial = serial
+        self.model = model
+        self.setObjectName("DeviceCard")
+        self.setProperty("status", "online")
+        add_shadow(self, blur=14, offset=4, alpha=45)
+
+        self.checkbox = QCheckBox()
         self.checkbox.setChecked(checked)
         self.checkbox.setCursor(Qt.PointingHandCursor)
-        self.setObjectName("DeviceCard")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(8)
         top.addWidget(self.checkbox)
+        title_stack = QVBoxLayout()
+        title_stack.setContentsMargins(0, 0, 0, 0)
+        title_stack.setSpacing(2)
+        self.model_label = QLabel(model)
+        self.model_label.setObjectName("DeviceName")
+        self.serial_label = QLabel(serial)
+        self.serial_label.setObjectName("DeviceSerial")
+        title_stack.addWidget(self.model_label)
+        title_stack.addWidget(self.serial_label)
+        top.addLayout(title_stack, 1)
         top.addStretch()
-        online = QLabel("Online")
-        online.setObjectName("OnlineLabel")
-        top.addWidget(online)
-
-        serial_label = QLabel(serial)
-        serial_label.setObjectName("DimLabel")
+        self.status_chip = StatusChip("online")
+        top.addWidget(self.status_chip)
 
         layout.addLayout(top)
-        layout.addWidget(serial_label)
 
     def is_checked(self):
         return self.checkbox.isChecked()
+
+    def set_status(self, status):
+        status = status if status in STATUS_STYLES else "offline"
+        self.setProperty("status", status)
+        self.status_chip.set_status(status)
+        repolish(self)
 
 
 class InstanceWindow(QMainWindow):
@@ -150,7 +313,7 @@ class InstanceWindow(QMainWindow):
         self.is_active = True
 
         self.setWindowTitle(model)
-        self.resize(400, 520)
+        self.resize(430, 560)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -161,30 +324,33 @@ class InstanceWindow(QMainWindow):
         header = QFrame()
         header.setObjectName("Card")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 14, 14, 14)
-        header_layout.setSpacing(4)
-        header_layout.addWidget(self._label(model, "Title"))
+        header_layout.setContentsMargins(16, 16, 16, 16)
+        header_layout.setSpacing(8)
+        header_top = QHBoxLayout()
+        header_top.setContentsMargins(0, 0, 0, 0)
+        header_top.addWidget(self._label(model, "Title"), 1)
+        self.status_chip = StatusChip("working")
+        header_top.addWidget(self.status_chip)
+        header_layout.addLayout(header_top)
         header_layout.addWidget(self._label(email, "AccentLabel"))
-        header_layout.addWidget(self._label(serial, "DimLabel"))
+        header_layout.addWidget(self._label(serial, "DeviceSerial"))
 
         stats_wrap = QWidget()
         stats = QGridLayout(stats_wrap)
         stats.setContentsMargins(0, 0, 0, 0)
-        stats.setHorizontalSpacing(8)
-        stats.setVerticalSpacing(8)
-        self.cycles_card = StatCard("Ciclos", "0", C["accent"])
-        self.profit_card = StatCard("Pontos Hoje", "+0", C["success"])
-        self.time_card = StatCard("Tempo", "00:00:00", C["warning"])
-        self.brl_card = StatCard("Lucro BRL", "R$ 0,00", C["accent_2"])
-        stats.addWidget(self.cycles_card, 0, 0)
-        stats.addWidget(self.profit_card, 0, 1)
-        stats.addWidget(self.time_card, 1, 0)
-        stats.addWidget(self.brl_card, 1, 1)
+        stats.setHorizontalSpacing(10)
+        stats.setVerticalSpacing(10)
+        self.brl_card = StatCard("Lucro BRL", "R$ 0,00", C["profit"], priority="primary", hint="resultado estimado")
+        self.profit_card = StatCard("Pontos Hoje", "+0", C["points"], priority="secondary", hint="saldo do dia")
+        self.cycles_card = StatCard("Ciclos", "0", C["accent"], priority="low")
+        self.time_card = StatCard("Tempo", "00:00:00", C["muted"], priority="low")
+        stats.addWidget(self.brl_card, 0, 0, 1, 2)
+        stats.addWidget(self.profit_card, 1, 0, 1, 2)
+        stats.addWidget(self.cycles_card, 2, 0)
+        stats.addWidget(self.time_card, 2, 1)
 
-        self.status_label = self._label("Status: iniciando...", "WarnLabel")
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setObjectName("Console")
+        self.status_label = self._label("Instancia em aquecimento", "DimLabel")
+        self.console = LogView(compact=True)
 
         root.addWidget(header)
         root.addWidget(stats_wrap)
@@ -197,8 +363,8 @@ class InstanceWindow(QMainWindow):
         return label
 
     def log(self, msg, level="info"):
-        self.console.append(f"[{datetime.now():%H:%M}] {msg}")
-        self.console.moveCursor(QTextCursor.End)
+        self.console.append_log(msg, level, self.serial)
+        self.console.trim_blocks(240)
 
     def update_stats(self, stats):
         profit = stats.get("profit", 0)
@@ -207,13 +373,13 @@ class InstanceWindow(QMainWindow):
         self.profit_card.set_value(f"+{profit:,}".replace(",", "."))
         self.time_card.set_value(stats.get("elapsed", "00:00:00"))
         self.brl_card.set_value(f"R$ {brl:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        self.status_label.setText("Status: ativo")
-        self.status_label.setStyleSheet(f"color: {C['success']}; font-weight: 700;")
+        self.status_label.setText("Instancia trabalhando")
+        self.status_chip.set_status("working")
 
     def on_finish(self):
         self.is_active = False
-        self.status_label.setText("Status: finalizado")
-        self.status_label.setStyleSheet(f"color: {C['danger']}; font-weight: 700;")
+        self.status_label.setText("Instancia finalizada")
+        self.status_chip.set_status("offline")
 
 
 class SpinGUI(QMainWindow):
@@ -266,7 +432,7 @@ class SpinGUI(QMainWindow):
 
         content_shell = QWidget()
         content_layout = QVBoxLayout(content_shell)
-        content_layout.setContentsMargins(14, 14, 14, 14)
+        content_layout.setContentsMargins(18, 18, 18, 18)
         self.stack = QStackedWidget()
         content_layout.addWidget(self.stack)
         root.addWidget(content_shell, 1)
@@ -284,25 +450,26 @@ class SpinGUI(QMainWindow):
     def _build_sidebar(self):
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(252)
+        sidebar.setFixedWidth(272)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
 
         brand = self._card("BrandCard")
         brand_layout = QVBoxLayout(brand)
-        brand_layout.setContentsMargins(16, 16, 16, 16)
-        brand_layout.setSpacing(6)
+        brand_layout.setContentsMargins(18, 18, 18, 18)
+        brand_layout.setSpacing(8)
         brand_layout.addWidget(self._make_label("SpinBot", "HeroTitle"))
-        brand_layout.addWidget(self._make_label("Painel moderno, compacto e pronto para automacao em lote.", "DimLabel"))
+        brand_layout.addWidget(self._make_label("Centro de operacao multi-instancia", "DimLabel"))
+        brand_layout.addWidget(StatusChip("online"), 0, Qt.AlignLeft)
         layout.addWidget(brand)
 
         stats_row = QWidget()
         stats = QGridLayout(stats_row)
         stats.setContentsMargins(0, 0, 0, 0)
         stats.setHorizontalSpacing(6)
-        self.devices_summary = StatCard("Dispositivos", "0", C["accent"])
-        self.emails_summary = StatCard("Emails", "0", C["accent_2"])
+        self.devices_summary = StatCard("Dispositivos", "0", C["accent"], priority="micro")
+        self.emails_summary = StatCard("Emails", "0", C["points"], priority="micro")
         stats.addWidget(self.devices_summary, 0, 0)
         stats.addWidget(self.emails_summary, 0, 1)
         layout.addWidget(stats_row)
@@ -310,7 +477,7 @@ class SpinGUI(QMainWindow):
         nav_card = self._card()
         nav_layout = QVBoxLayout(nav_card)
         nav_layout.setContentsMargins(8, 8, 8, 8)
-        nav_layout.setSpacing(4)
+        nav_layout.setSpacing(6)
         self.nav_buttons = {}
         for key, index_text, text in NAV_ITEMS:
             button = NavButton(index_text, text)
@@ -321,8 +488,8 @@ class SpinGUI(QMainWindow):
 
         emails_card = self._card()
         emails_layout = QVBoxLayout(emails_card)
-        emails_layout.setContentsMargins(12, 12, 12, 12)
-        emails_layout.setSpacing(8)
+        emails_layout.setContentsMargins(14, 14, 14, 14)
+        emails_layout.setSpacing(10)
         emails_layout.addWidget(self._make_label("Emails", "SectionTitle"))
         emails_layout.addWidget(self._make_label("Um por linha para distribuir entre as instancias selecionadas.", "DimLabel"))
         self.txt_emails = QPlainTextEdit()
@@ -373,28 +540,28 @@ class SpinGUI(QMainWindow):
         page = QWidget()
         grid = QGridLayout(page)
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
-        grid.setColumnStretch(0, 3)
-        grid.setColumnStretch(1, 4)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(14)
+        grid.setColumnStretch(0, 5)
+        grid.setColumnStretch(1, 6)
         grid.setRowStretch(2, 1)
 
         hero = self._card()
         hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(14, 14, 14, 14)
-        hero_layout.setSpacing(10)
+        hero_layout.setContentsMargins(18, 18, 18, 18)
+        hero_layout.setSpacing(12)
         hero_layout.addWidget(self._make_label("Operacao Central", "SectionTitle"))
-        hero_layout.addWidget(self._make_label("Controle o lote atual, acompanhe o progresso e distribua a automacao entre varias instancias.", "DimLabel"))
+        hero_layout.addWidget(self._make_label("Controle o lote atual, acompanhe progresso e mantenha cada instancia visivel.", "DimLabel"))
 
         actions = QHBoxLayout()
         self.start_button = self._button("Iniciar", primary=True)
         self.start_button.clicked.connect(self._toggle_run)
-        refresh_button = self._button("Atualizar")
-        refresh_button.clicked.connect(self._refresh_devs)
+        self.refresh_button = self._button("Atualizar")
+        self.refresh_button.clicked.connect(self._refresh_devs)
         self.ultra_eco_checkbox = QCheckBox("Ultra-eco")
         self.ultra_eco_checkbox.setCursor(Qt.PointingHandCursor)
         actions.addWidget(self.start_button)
-        actions.addWidget(refresh_button)
+        actions.addWidget(self.refresh_button)
         actions.addStretch()
         actions.addWidget(self.ultra_eco_checkbox)
         hero_layout.addLayout(actions)
@@ -407,33 +574,33 @@ class SpinGUI(QMainWindow):
         metrics_wrap = QWidget()
         metrics = QGridLayout(metrics_wrap)
         metrics.setContentsMargins(0, 0, 0, 0)
-        metrics.setHorizontalSpacing(8)
-        metrics.setVerticalSpacing(8)
-        self.total_cycles_card = StatCard("Ciclos", "0", C["accent"])
-        self.total_profit_card = StatCard("Pontos Hoje", "+0", C["success"])
-        self.total_time_card = StatCard("Tempo", "00:00:00", C["warning"])
-        self.total_brl_card = StatCard("Lucro BRL", "R$ 0,00", C["accent_2"])
-        metrics.addWidget(self.total_cycles_card, 0, 0)
-        metrics.addWidget(self.total_profit_card, 0, 1)
-        metrics.addWidget(self.total_time_card, 1, 0)
-        metrics.addWidget(self.total_brl_card, 1, 1)
+        metrics.setHorizontalSpacing(12)
+        metrics.setVerticalSpacing(12)
+        self.total_brl_card = StatCard("Lucro BRL", "R$ 0,00", C["profit"], priority="primary", hint="estimativa financeira")
+        self.total_profit_card = StatCard("Pontos Hoje", "+0", C["points"], priority="secondary", hint="soma das contas")
+        self.total_cycles_card = StatCard("Ciclos", "0", C["accent"], priority="low")
+        self.total_time_card = StatCard("Tempo", "00:00:00", C["muted"], priority="low")
+        metrics.addWidget(self.total_brl_card, 0, 0, 1, 2)
+        metrics.addWidget(self.total_profit_card, 1, 0, 1, 2)
+        metrics.addWidget(self.total_cycles_card, 2, 0)
+        metrics.addWidget(self.total_time_card, 2, 1)
         grid.addWidget(metrics_wrap, 1, 0)
 
         activity = self._card()
         activity_layout = QVBoxLayout(activity)
-        activity_layout.setContentsMargins(14, 14, 14, 14)
+        activity_layout.setContentsMargins(18, 18, 18, 18)
+        activity_layout.setSpacing(10)
         activity_layout.addWidget(self._make_label("Atividades", "SectionTitle"))
-        self.mini_log = QTextEdit()
-        self.mini_log.setReadOnly(True)
-        self.mini_log.setObjectName("Console")
+        self.mini_log = LogView(compact=True)
         activity_layout.addWidget(self.mini_log, 1)
         grid.addWidget(activity, 2, 0)
 
         instances = self._card()
         instances_layout = QVBoxLayout(instances)
-        instances_layout.setContentsMargins(14, 14, 14, 14)
+        instances_layout.setContentsMargins(18, 18, 18, 18)
+        instances_layout.setSpacing(10)
         instances_layout.addWidget(self._make_label("Instancias", "SectionTitle"))
-        instances_layout.addWidget(self._make_label("Lista compacta com rolagem para acomodar diferentes resolucoes.", "DimLabel"))
+        instances_layout.addWidget(self._make_label("Status, serial e selecao dos dispositivos conectados.", "DimLabel"))
         self.device_scroll = QScrollArea()
         self.device_scroll.setWidgetResizable(True)
         self.device_scroll.setObjectName("ScrollArea")
@@ -455,14 +622,15 @@ class SpinGUI(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         card = self._card()
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(10)
         card_layout.addWidget(self._make_label("Projecoes", "SectionTitle"))
         card_layout.addWidget(self._make_label("Estimativas baseadas no ritmo atual da sessao.", "DimLabel"))
         self.prediction_labels = {}
         for label_text in ["1 Hora", "12 Horas", "1 Dia", "1 Semana", "1 Mes"]:
             row = self._card("InnerCard")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.setContentsMargins(14, 12, 14, 12)
             row_layout.addWidget(self._make_label(label_text, "BodyLabel"))
             row_layout.addStretch()
             value = self._make_label("Calculando...", "AccentLabel")
@@ -479,7 +647,8 @@ class SpinGUI(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         card = self._card()
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(10)
         card_layout.addWidget(self._make_label("Relatorios Diarios", "SectionTitle"))
         card_layout.addWidget(self._make_label("Resumo persistido por conta e total agregado do dia.", "DimLabel"))
         self.reports_text = QPlainTextEdit()
@@ -501,7 +670,8 @@ class SpinGUI(QMainWindow):
 
         connection = self._card()
         connection_layout = QVBoxLayout(connection)
-        connection_layout.setContentsMargins(14, 14, 14, 14)
+        connection_layout.setContentsMargins(18, 18, 18, 18)
+        connection_layout.setSpacing(10)
         connection_layout.addWidget(self._make_label("Conexao e Dispositivo", "SectionTitle"))
         connection_layout.addWidget(self._make_label("Atualize a lista local ou conecte um ADB remoto sem sair do painel.", "DimLabel"))
         connection_layout.addWidget(self._make_label("Dispositivo padrao", "BodyLabel"))
@@ -510,9 +680,9 @@ class SpinGUI(QMainWindow):
         self.device_combo = QComboBox()
         self.device_combo.currentTextChanged.connect(self._on_device_combo_changed)
         combo_row.addWidget(self.device_combo, 1)
-        refresh_button = self._button("Atualizar")
-        refresh_button.clicked.connect(self._refresh_devs)
-        combo_row.addWidget(refresh_button)
+        self.settings_refresh_button = self._button("Atualizar")
+        self.settings_refresh_button.clicked.connect(self._refresh_devs)
+        combo_row.addWidget(self.settings_refresh_button)
         connection_layout.addLayout(combo_row)
 
         connection_layout.addWidget(self._make_label("ADB remoto (IP:porta)", "BodyLabel"))
@@ -521,13 +691,15 @@ class SpinGUI(QMainWindow):
         self.adb_input.setObjectName("LineInput")
         adb_row.addWidget(self.adb_input, 1)
         connect_button = self._button("Conectar", primary=True)
-        connect_button.clicked.connect(self._connect_adb)
-        adb_row.addWidget(connect_button)
+        self.connect_button = connect_button
+        self.connect_button.clicked.connect(self._connect_adb)
+        adb_row.addWidget(self.connect_button)
         connection_layout.addLayout(adb_row)
 
         tools = self._card()
         tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(14, 14, 14, 14)
+        tools_layout.setContentsMargins(18, 18, 18, 18)
+        tools_layout.setSpacing(10)
         tools_layout.addWidget(self._make_label("Ferramentas Avancadas", "SectionTitle"))
         tools_layout.addWidget(self._make_label("Use a calibracao para ajustar leitura e clique em dispositivos com resolucoes diferentes.", "DimLabel"))
         calibrate_button = self._button("Recalibrar Tela")
@@ -546,12 +718,11 @@ class SpinGUI(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         card = self._card()
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(10)
         card_layout.addWidget(self._make_label("Console Consolidado", "SectionTitle"))
         card_layout.addWidget(self._make_label("Logs completos das automacoes em execucao.", "DimLabel"))
-        self.txt_log = QTextEdit()
-        self.txt_log.setReadOnly(True)
-        self.txt_log.setObjectName("Console")
+        self.txt_log = LogView()
         card_layout.addWidget(self.txt_log, 1)
         layout.addWidget(card)
         self.stack.addWidget(page)
@@ -576,19 +747,45 @@ class SpinGUI(QMainWindow):
                 font-size: 12px;
             }}
             #Sidebar {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {C['panel']}, stop:1 {C['bg_alt']});
-                border-right: 1px solid {C['border']};
+                background: {C['panel']};
+                border-right: 1px solid {C['border_soft']};
             }}
             #Card, #BrandCard, #StatCard, #DeviceCard, #InnerCard, #WelcomeCard {{
                 background: {C['surface']};
                 border: 1px solid {C['border']};
-                border-radius: 14px;
+                border-radius: 8px;
+            }}
+            #Card:hover, #InnerCard:hover {{
+                border-color: {C['surface_soft']};
             }}
             #InnerCard {{
                 background: {C['surface_alt']};
             }}
             #WelcomeCard {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {C['surface']}, stop:1 {C['surface_alt']});
+                background: {C['surface_alt']};
+            }}
+            #BrandCard {{
+                background: {C['panel_alt']};
+                border-color: {C['surface_soft']};
+            }}
+            QFrame#StatCard[priority="primary"] {{
+                background: {C['surface_alt']};
+                border: 1px solid {C['profit']};
+            }}
+            QFrame#StatCard[priority="secondary"] {{
+                background: {C['surface']};
+                border: 1px solid {C['surface_soft']};
+            }}
+            QFrame#StatCard[priority="low"], QFrame#StatCard[priority="micro"] {{
+                background: {C['surface']};
+                border-color: {C['border_soft']};
+            }}
+            QFrame#StatCard[pulse="on"] {{
+                border-color: {C['accent_hover']};
+                background: {C['surface_alt']};
+            }}
+            QFrame#KpiAccent {{
+                border: 0;
             }}
             QLabel, QCheckBox {{
                 background: transparent;
@@ -599,41 +796,68 @@ class SpinGUI(QMainWindow):
             }}
             #NavButton {{
                 text-align: left;
-                padding: 9px 12px;
+                padding: 10px 12px;
                 border: 0;
-                border-radius: 10px;
-                background: {C['surface']};
+                border-radius: 8px;
+                background: transparent;
                 color: {C['muted']};
                 font-weight: 700;
             }}
-            #NavButton:checked {{
-                background: {C['surface_soft']};
+            #NavButton:hover {{
+                background: {C['surface']};
                 color: {C['text']};
             }}
-            QLabel#HeroTitle {{ font-size: 28px; font-weight: 800; color: {C['text']}; }}
+            #NavButton:checked {{
+                background: {C['surface_alt']};
+                color: {C['text']};
+                border-left: 3px solid {C['accent']};
+            }}
+            QLabel#HeroTitle {{ font-size: 30px; font-weight: 900; color: {C['text']}; }}
             QLabel#WelcomeTitle {{ font-size: 42px; font-weight: 800; color: {C['text']}; }}
             QLabel#WelcomeSubtitle {{ font-size: 14px; color: {C['muted']}; }}
-            QLabel#SectionTitle {{ font-size: 20px; font-weight: 800; }}
-            QLabel#Title {{ font-size: 18px; font-weight: 800; }}
+            QLabel#SectionTitle {{ font-size: 20px; font-weight: 900; }}
+            QLabel#Title {{ font-size: 18px; font-weight: 900; }}
             QLabel#StatValue {{ font-size: 28px; font-weight: 800; }}
+            QFrame#StatCard[priority="primary"] QLabel#StatValue {{ font-size: 34px; font-weight: 900; }}
+            QFrame#StatCard[priority="secondary"] QLabel#StatValue {{ font-size: 30px; font-weight: 900; }}
+            QFrame#StatCard[priority="micro"] QLabel#StatValue {{ font-size: 22px; }}
             QLabel#CardCaption, QLabel#DimLabel {{ color: {C['muted']}; }}
+            QLabel#CardHint {{ color: {C['muted_2']}; font-size: 11px; }}
             QLabel#BodyLabel {{ color: {C['text']}; font-weight: 700; }}
             QLabel#AccentLabel {{ color: {C['accent']}; font-weight: 800; }}
             QLabel#WarnLabel {{ color: {C['warning']}; font-weight: 800; }}
-            QLabel#OnlineLabel {{ color: {C['success']}; font-size: 11px; font-weight: 700; }}
-            QLabel#StatusBadge {{ background: {C['surface_soft']}; border-radius: 11px; padding: 7px 12px; }}
-            QPushButton {{ background: {C['surface_soft']}; color: {C['text']}; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 800; }}
-            QPushButton:hover {{ background: #3a4962; }}
-            QLineEdit#LineInput, QPlainTextEdit#InputArea, QPlainTextEdit#Console, QTextEdit#Console, QComboBox {{
-                background: {C['surface_alt']};
-                border: 1px solid {C['border']};
-                border-radius: 10px;
-                padding: 8px;
+            QLabel#DeviceName {{ color: {C['text']}; font-weight: 900; font-size: 13px; }}
+            QLabel#DeviceSerial {{ color: {C['muted_2']}; font-family: 'Cascadia Mono', 'Consolas'; font-size: 11px; }}
+            QLabel#StatusBadge {{ background: {C['surface_soft']}; border: 1px solid {C['border']}; border-radius: 8px; padding: 7px 12px; font-weight: 800; }}
+            QPushButton#AppButton {{
+                background: {C['surface_soft']};
                 color: {C['text']};
+                border: 1px solid {C['border']};
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-weight: 900;
+            }}
+            QPushButton#AppButton:hover {{ background: {C['surface_hover']}; border-color: {C['accent']}; }}
+            QPushButton#AppButton:pressed {{ background: {C['surface_alt']}; padding-top: 11px; padding-bottom: 9px; }}
+            QPushButton#AppButton:focus {{ border: 1px solid {C['accent_hover']}; }}
+            QPushButton#AppButton[variant="primary"] {{ background: {C['accent']}; color: #08110f; border-color: {C['accent']}; }}
+            QPushButton#AppButton[variant="primary"]:hover {{ background: {C['accent_hover']}; }}
+            QPushButton#AppButton[variant="danger"] {{ background: {C['danger']}; color: #16080a; border-color: {C['danger']}; }}
+            QPushButton#AppButton[variant="danger"]:hover {{ background: {C['danger_hover']}; }}
+            QPushButton#AppButton[variant="loading"] {{ background: {C['surface_alt']}; color: {C['muted']}; border-color: {C['warning']}; }}
+            QLineEdit#LineInput, QPlainTextEdit#InputArea, QPlainTextEdit#Console, QTextEdit#Console, QComboBox {{
+                background: {C['console']};
+                border: 1px solid {C['border']};
+                border-radius: 8px;
+                padding: 9px;
+                color: {C['text']};
+                selection-background-color: {C['accent']};
+                selection-color: #07100e;
             }}
             QComboBox {{
-                min-height: 18px;
+                min-height: 22px;
                 padding-right: 30px;
+                background: {C['surface_alt']};
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
@@ -641,8 +865,8 @@ class SpinGUI(QMainWindow):
                 width: 28px;
                 border: none;
                 background: {C['surface_soft']};
-                border-top-right-radius: 10px;
-                border-bottom-right-radius: 10px;
+                border-top-right-radius: 8px;
+                border-bottom-right-radius: 8px;
             }}
             QComboBox::down-arrow {{
                 image: none;
@@ -673,22 +897,41 @@ class SpinGUI(QMainWindow):
                 color: {C['text']};
             }}
             QTextEdit#Console, QPlainTextEdit#Console {{
-                background: {C['bg_alt']};
+                background: {C['console']};
+                font-family: 'Cascadia Mono', 'Consolas';
+                font-size: 11px;
             }}
+            QFrame#DeviceCard[status="working"] {{ border-color: {C['profit']}; background: {C['surface_alt']}; }}
+            QFrame#DeviceCard[status="paused"] {{ border-color: {C['warning']}; }}
+            QFrame#DeviceCard[status="error"] {{ border-color: {C['danger']}; }}
+            QFrame#DeviceCard[status="offline"] {{ border-color: {C['border_soft']}; }}
             QFrame {{
                 background: transparent;
             }}
             QScrollArea#ScrollArea {{ border: 0; background: transparent; }}
-            QScrollBar:vertical {{ background: {C['panel']}; width: 10px; border-radius: 5px; }}
-            QScrollBar::handle:vertical {{ background: {C['surface_soft']}; min-height: 24px; border-radius: 5px; }}
+            QScrollBar:vertical {{ background: {C['panel']}; width: 9px; border-radius: 4px; }}
+            QScrollBar::handle:vertical {{ background: {C['surface_soft']}; min-height: 26px; border-radius: 4px; }}
+            QScrollBar::handle:vertical:hover {{ background: {C['surface_hover']}; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-            QCheckBox {{ spacing: 8px; font-weight: 700; }}
+            QCheckBox {{ spacing: 8px; font-weight: 800; color: {C['text']}; }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 5px;
+                border: 1px solid {C['border']};
+                background: {C['surface_alt']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {C['accent']};
+                border-color: {C['accent']};
+            }}
             """
         )
 
     def _card(self, object_name="Card"):
         card = QFrame()
         card.setObjectName(object_name)
+        add_shadow(card, blur=22, offset=8, alpha=80)
         return card
 
     def _make_label(self, text, object_name):
@@ -699,13 +942,22 @@ class SpinGUI(QMainWindow):
 
     def _button(self, text, primary=False):
         button = QPushButton(text)
-        if primary:
-            button.setStyleSheet(
-                f"QPushButton {{background: {C['accent']}; color: {C['text']}; border-radius: 10px; padding: 10px 14px; font-weight: 800;}}"
-                f"QPushButton:hover {{background: #7fa7ff;}}"
-            )
+        button.setObjectName("AppButton")
+        button.setProperty("variant", "primary" if primary else "default")
         button.setCursor(Qt.PointingHandCursor)
         return button
+
+    def _set_button_variant(self, button, variant, text=None, enabled=True):
+        if text is not None:
+            button.setText(text)
+        button.setEnabled(enabled)
+        button.setProperty("variant", variant)
+        repolish(button)
+
+    def _flash_button_text(self, button, text, ms=900):
+        original = button.text()
+        button.setText(text)
+        QTimer.singleShot(ms, lambda: button.setText(original))
 
     def _show_page(self, key):
         for nav_key, button in self.nav_buttons.items():
@@ -724,9 +976,14 @@ class SpinGUI(QMainWindow):
         self.selected_device_value = value
 
     def _append_global_log(self, msg, level="info"):
-        timestamp = f"[{datetime.now():%H:%M}] "
-        self.txt_log.append(f"{timestamp}{msg}")
-        self.mini_log.append(f"{timestamp}{msg}")
+        source = None
+        body = msg
+        if isinstance(msg, str) and msg.startswith("[") and "] " in msg:
+            idx = msg.find("] ")
+            source = msg[1:idx]
+            body = msg[idx + 2:]
+        self.txt_log.append_log(body, level, source)
+        self.mini_log.append_log(body, level, source)
         self._trim_console(self.txt_log, getattr(config, "MAX_LOG_LINES", 500))
         self._trim_console(self.mini_log, 20)
 
@@ -737,6 +994,9 @@ class SpinGUI(QMainWindow):
         self.bus.global_log.emit(f"[{serial}] {msg}", level)
 
     def _trim_console(self, widget, max_lines):
+        if hasattr(widget, "trim_blocks"):
+            widget.trim_blocks(max_lines)
+            return
         lines = widget.toPlainText().splitlines()
         if len(lines) > max_lines:
             widget.setPlainText("\n".join(lines[-max_lines:]))
@@ -777,11 +1037,7 @@ class SpinGUI(QMainWindow):
         self.is_running = True
         self.session_start = datetime.now()
         self.instance_stats = {}
-        self.start_button.setText("Parar")
-        self.start_button.setStyleSheet(
-            f"QPushButton {{background: {C['danger']}; color: {C['text']}; border-radius: 10px; padding: 10px 14px; font-weight: 800;}}"
-            f"QPushButton:hover {{background: #ff8c8c;}}"
-        )
+        self._set_button_variant(self.start_button, "danger", "Parar")
         self.status_badge.setText(f"{len(devices)} instancia(s) em execucao")
         self.bus.global_log.emit(f"Iniciando lote com {len(devices)} dispositivo(s).", "header")
 
@@ -791,6 +1047,9 @@ class SpinGUI(QMainWindow):
             window.move(70 + (index * 28), 70 + (index * 28))
             window.show()
             self.instance_windows[serial] = window
+            card = self.device_cards.get(serial)
+            if card:
+                card.set_status("working")
 
         try:
             self.orchestrator.start(configs, ultra_eco=self.ultra_eco_checkbox.isChecked())
@@ -802,14 +1061,21 @@ class SpinGUI(QMainWindow):
         if not self.is_running:
             return
         self.orchestrator.stop()
+        self._set_button_variant(self.start_button, "loading", "Parando...", enabled=False)
         self.status_badge.setText("Encerrando instancias...")
         self.bus.global_log.emit("Solicitando parada de todas as instancias...", "warning")
+        for card in self.device_cards.values():
+            if card.is_checked():
+                card.set_status("paused")
 
     def _store_instance_stats(self, serial, stats):
         self.instance_stats[serial] = stats
         window = self.instance_windows.get(serial)
         if window:
             window.update_stats(stats)
+        card = self.device_cards.get(serial)
+        if card:
+            card.set_status("working")
         self._update_aggregate_stats()
 
     def _update_aggregate_stats(self):
@@ -829,21 +1095,29 @@ class SpinGUI(QMainWindow):
         window = self.instance_windows.get(serial)
         if window:
             window.on_finish()
+        card = self.device_cards.get(serial)
+        if card:
+            snapshot = self.orchestrator.snapshot().get(serial)
+            if snapshot and snapshot.status == InstanceStatus.FAILED:
+                card.set_status("error")
+            elif snapshot and snapshot.status == InstanceStatus.STOPPED:
+                card.set_status("paused")
+            else:
+                card.set_status("offline")
         if self.instance_windows and all(not item.is_active for item in self.instance_windows.values()):
             self._on_all_finish()
 
     def _on_all_finish(self):
         self.is_running = False
-        self.start_button.setText("Iniciar")
-        self.start_button.setStyleSheet(
-            f"QPushButton {{background: {C['accent']}; color: {C['text']}; border-radius: 10px; padding: 10px 14px; font-weight: 800;}}"
-            f"QPushButton:hover {{background: #7fa7ff;}}"
-        )
+        self._set_button_variant(self.start_button, "primary", "Iniciar", enabled=True)
         self.status_badge.setText("Processo finalizado")
         self.reports_dirty = True
         self.bus.global_log.emit("Todas as instancias foram finalizadas.", "header")
 
     def _refresh_devs(self):
+        for button in (getattr(self, "refresh_button", None), getattr(self, "settings_refresh_button", None)):
+            if button:
+                self._flash_button_text(button, "Atualizando...")
         try:
             devices = self.device_manager.refresh()
         except Exception as exc:
@@ -869,6 +1143,7 @@ class SpinGUI(QMainWindow):
             model = device.model
             combo_values.append(f"{serial} | {model}")
             card = DeviceCard(serial, model, checked=True)
+            card.set_status("online")
             self.device_cards[serial] = card
             self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, card)
 
@@ -886,11 +1161,14 @@ class SpinGUI(QMainWindow):
             return
         try:
             self.bus.global_log.emit(f"Conectando a {address}...", "action")
+            self._set_button_variant(self.connect_button, "loading", "Conectando...", enabled=False)
             result = self.device_manager.connect_remote(address)
             self.bus.global_log.emit(f"Resultado do ADB: {result}", "info")
             self._refresh_devs()
         except Exception as exc:
             self.bus.global_log.emit(str(exc), "error")
+        finally:
+            self._set_button_variant(self.connect_button, "primary", "Conectar", enabled=True)
 
     def _start_calib(self):
         if not self.selected_device_value:

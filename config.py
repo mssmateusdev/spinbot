@@ -2,7 +2,7 @@
 # CONFIGURAÇÃO DO SPINBOT
 # ============================================================
 
-APP_VERSION = "0.6.4"
+APP_VERSION = "0.6.5"
 
 # --- Resolução do celular ---
 SCREEN_WIDTH = 1080

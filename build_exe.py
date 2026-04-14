@@ -4,7 +4,7 @@ import shutil
 import PyInstaller.__main__
 
 
-BUILD_NAME = "SpinBot_v0.6.4"
+BUILD_NAME = "SpinBot_v0.6.5"
 
 
 if os.path.exists(f"dist/{BUILD_NAME}"):

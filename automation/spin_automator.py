@@ -160,7 +160,7 @@ class SpinAutomator:
                 
                 # Garantir início limpo (primeira iteração ou reconexão crítica)
                 if self.start_time is None or getattr(self, '_first_run', True):
-                    self.log(f"SpinBot v{getattr(config, 'APP_VERSION', '0.6.4')} iniciado - realizando limpeza inicial de dados...", "header")
+                    self.log(f"SpinBot v{getattr(config, 'APP_VERSION', '0.6.5')} iniciado - realizando limpeza inicial de dados...", "header")
                     self.device.app_clear(config.APP_PACKAGE)
                     self.wait(3)
                     self.start_time = datetime.now()

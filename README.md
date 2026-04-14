@@ -33,13 +33,13 @@ python -m unittest discover -s tests
 O projeto mantem `gui.py` como entrada compativel para PyInstaller.
 
 ```bash
-python -m PyInstaller --noconfirm --clean SpinBot_v0.6.4.spec
+python -m PyInstaller --noconfirm --clean SpinBot_v0.6.5.spec
 ```
 
 Saida esperada:
 
 ```text
-dist/SpinBot_v0.6.4/SpinBot_v0.6.4.exe
+dist/SpinBot_v0.6.5/SpinBot_v0.6.5.exe
 ```
 
-Como o build esta em modo `onedir`, envie a pasta `dist/SpinBot_v0.6.4` inteira, incluindo `_internal`.
+Como o build esta em modo `onedir`, envie a pasta `dist/SpinBot_v0.6.5` inteira, incluindo `_internal`.
