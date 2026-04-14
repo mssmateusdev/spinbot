@@ -1,6 +1,8 @@
 # ============================================================
-# CONFIGURAÇÃO DO AUTOMADOR DE SPINS (v0.4.0 Otimizado)
+# CONFIGURAÇÃO DO SPINBOT
 # ============================================================
+
+APP_VERSION = "0.6.4"
 
 # --- Resolução do celular ---
 SCREEN_WIDTH = 1080
@@ -22,6 +24,8 @@ SPIN_WAIT_TIME = 2.8
 TURBO_CLICK_INTERVAL = 0.4 # Reduzido de 0.5s para 0.4s
 TURBO_RESULT_CHECK_EVERY = 3
 TURBO_COIN_UPDATE_EVERY = 5
+PRE_AD_SPIN_CHECK_WAIT = 1.2
+PRE_AD_CONFIRM_WAIT = 1.0
 
 AD_MAX_WAIT = 40         # Reduzido de 45s
 AD_CHECK_INTERVAL = 1.0   # Polling mais rápido (baixado de 1.5s)

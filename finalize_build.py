@@ -2,7 +2,7 @@ import os
 import shutil
 
 
-BUILD_NAME = "SpinBot_v0.6.2"
+BUILD_NAME = "SpinBot_v0.6.4"
 DIST_PATH = f"dist/{BUILD_NAME}"
 
 

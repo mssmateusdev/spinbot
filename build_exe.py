@@ -4,7 +4,7 @@ import shutil
 import PyInstaller.__main__
 
 
-BUILD_NAME = "SpinBot_v0.6.2"
+BUILD_NAME = "SpinBot_v0.6.4"
 
 
 if os.path.exists(f"dist/{BUILD_NAME}"):
@@ -30,6 +30,11 @@ args = [
     "--hidden-import=PySide6.QtCore",
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
+    "--hidden-import=app.bootstrap",
+    "--hidden-import=ui.main_window",
+    "--hidden-import=automation.orchestrator",
+    "--hidden-import=automation.spin_automator",
+    "--hidden-import=services.stats_store",
     "--collect-all=uiautomator2",
     "--collect-all=adbutils",
     "--collect-all=PIL",
